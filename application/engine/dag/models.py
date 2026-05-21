@@ -55,6 +55,9 @@ class EdgeCondition(str, Enum):
     ON_BREAKER_CLOSED = "on_breaker_closed"
     ON_REVIEW_APPROVED = "on_review_approved"
     ON_REVIEW_REJECTED = "on_review_rejected"
+    ON_SWITCH_A = "on_switch_a"    # gw_switch 路由到 case_a
+    ON_SWITCH_B = "on_switch_b"    # gw_switch 路由到 case_b
+    ON_SWITCH_DEFAULT = "on_switch_default"  # gw_switch 路由到 case_default
     ALWAYS = "always"
 
 
@@ -482,12 +485,16 @@ def get_default_dag() -> DAGDefinition:
             NodeDefinition(id="ctx_foreshadow", type="ctx_foreshadow", label="🪝 伏笔注入器", position={"x": 100, "y": 400}),
             NodeDefinition(id="ctx_voice", type="ctx_voice", label="🎭 角色声线注入", position={"x": 100, "y": 550}),
             NodeDefinition(id="ctx_debt", type="ctx_debt", label="💰 叙事债务", position={"x": 100, "y": 700}),
+            NodeDefinition(id="ctx_characters", type="ctx_characters", label="👤 角色档案", position={"x": 100, "y": 850}),
+            NodeDefinition(id="ctx_recent", type="ctx_recent", label="📖 前情提要", position={"x": 100, "y": 1000}),
+            NodeDefinition(id="ctx_storyline", type="ctx_storyline", label="🧭 主线进度", position={"x": 100, "y": 1150}),
+            NodeDefinition(id="ctx_assembler", type="ctx_assembler", label="🧩 上下文拼装", position={"x": 350, "y": 500}),
             NodeDefinition(id="exec_beat", type="exec_beat", label="🥁 节拍放大器", position={"x": 500, "y": 200}),
             NodeDefinition(
                 id="exec_writer", type="exec_writer", label="✍️ 剧情引擎", position={"x": 800, "y": 300},
                 config=NodeConfig(
-                    prompt_template="写作姿态：回忆并讲述这段事；避免写成交差用的说明文。\n\n{{context}}\n{{outline}}\n{{voice_block}}",
-                    prompt_variables={"context": "", "outline": "", "voice_block": ""},
+                    prompt_template="写作姿态：回忆并讲述这段事；避免写成交差用的说明文。\n\n{{context}}",
+                    prompt_variables={"context": ""},
                 ),
             ),
             NodeDefinition(
@@ -519,12 +526,21 @@ def get_default_dag() -> DAGDefinition:
             ),
         ],
         edges=[
+            # ctx → ctx_assembler（上下文原料） + ctx_blueprint/memory → exec_beat（节拍放大需要世界规则和事实锁）
             EdgeDefinition(id="edge_01", source="ctx_blueprint", target="exec_beat", source_port="world_rules"),
             EdgeDefinition(id="edge_02", source="ctx_memory", target="exec_beat", source_port="fact_lock"),
-            EdgeDefinition(id="edge_03", source="ctx_foreshadow", target="exec_writer", source_port="foreshadowing_block"),
-            EdgeDefinition(id="edge_04", source="ctx_voice", target="exec_writer", source_port="voice_block"),
-            EdgeDefinition(id="edge_05", source="ctx_debt", target="exec_writer", source_port="debt_due_block"),
-            EdgeDefinition(id="edge_06", source="exec_beat", target="exec_writer", source_port="beats"),
+            # 其余上下文原料全部汇入 ctx_assembler
+            EdgeDefinition(id="edge_03", source="ctx_foreshadow", target="ctx_assembler", source_port="foreshadowing_block"),
+            EdgeDefinition(id="edge_04", source="ctx_voice", target="ctx_assembler", source_port="voice_block"),
+            EdgeDefinition(id="edge_05", source="ctx_debt", target="ctx_assembler", source_port="debt_due_block"),
+            # exec_beat 产出 beats → ctx_assembler（章节大纲也一起给 assembler）
+            EdgeDefinition(id="edge_06", source="exec_beat", target="ctx_assembler", source_port="beats"),
+            # ctx_assembler 拼装后 → exec_writer
+            EdgeDefinition(id="edge_06b", source="ctx_assembler", target="exec_writer", source_port="context"),
+            # 新上下文节点 → ctx_assembler
+            EdgeDefinition(id="edge_char", source="ctx_characters", target="ctx_assembler", source_port="character_block"),
+            EdgeDefinition(id="edge_rec", source="ctx_recent", target="ctx_assembler", source_port="previously_on"),
+            EdgeDefinition(id="edge_stl", source="ctx_storyline", target="ctx_assembler", source_port="storyline_block"),
             EdgeDefinition(id="edge_07", source="exec_writer", target="val_style", source_port="content"),
             EdgeDefinition(id="edge_08", source="exec_writer", target="val_tension", source_port="content"),
             EdgeDefinition(id="edge_09", source="exec_writer", target="val_anti_ai", source_port="content"),

@@ -387,6 +387,12 @@ def _make_condition_function(condition: EdgeCondition, target: str):
             return state.get("review_approved", False)
         elif condition == EdgeCondition.ON_REVIEW_REJECTED:
             return not state.get("review_approved", False)
+        elif condition == EdgeCondition.ON_SWITCH_A:
+            return state.get("switch_port") == "case_a"
+        elif condition == EdgeCondition.ON_SWITCH_B:
+            return state.get("switch_port") == "case_b"
+        elif condition == EdgeCondition.ON_SWITCH_DEFAULT:
+            return state.get("switch_port", "case_default") == "case_default"
         return True
 
     return condition_fn

@@ -1,17 +1,18 @@
 /**
- * DAG 画布核心状态管理 — 纯展示层
+ * DAG 画布核心状态管理 — 支持浏览/编辑双模式
  *
  * 设计原则：
- * - DAG 不需要判断能否执行 — 执行权在全托管，DAG 只是展示状态流转
- * - 节点注册是代码行为 — 写一个节点就注册一个，不存在"同步"一说
- * - 保存/校验/广场按钮都是多余的 — DAG 是纯展示层
- * - 暂时不走数据库 — DAG 定义从注册表生成
+ * - 浏览模式：只读展示，节点状态 SSE 实时更新
+ * - 编辑模式：可拖拽节点、连线、修改配置，手动保存到后端
+ * - DAG 定义持久化到 SQLite dag_versions 表
  */
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type {
   DAGDefinition,
   DagRegistryLinkageResponse,
+  EdgeDefinition,
+  NodeDefinition,
   NodeEvent,
   NodeMeta,
   NodePromptLive,
@@ -19,6 +20,11 @@ import type {
   NodeStatus,
 } from '@/types/dag'
 import { dagApi } from '@/api/dag'
+
+/** 创建唯一 ID（前端临时使用，保存时后端会重新校验） */
+function uid(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
 
 export const useDAGStore = defineStore('dag', () => {
   // ─── DAG 定义（只读展示） ───
@@ -48,17 +54,29 @@ export const useDAGStore = defineStore('dag', () => {
   // ─── 视图切换（AutopilotDashboard 使用） ───
   const viewMode = ref<'card' | 'dag'>('card')
 
-  // ─── 计算属性：Vue Flow 节点数据 ───
-  const vueFlowNodes = computed(() => {
-    if (!dagDefinition.value) return []
+  // ─── 编辑模式 ───
+  const editMode = ref(false)
+
+  // ─── Vue Flow 可写节点/边（编辑模式下 Vue Flow v-model 需要可写 ref） ───
+  const vueFlowNodes = ref<any[]>([])
+  const vueFlowEdges = ref<any[]>([])
+
+  /** 从 dagDefinition 重建 vueFlow 节点/边数据 */
+  function rebuildFlowData() {
+    const dag = dagDefinition.value
+    if (!dag) {
+      vueFlowNodes.value = []
+      vueFlowEdges.value = []
+      return
+    }
 
     const reg = nodeTypeRegistry.value
     const regLoaded = Object.keys(reg).length > 0
 
-    return dagDefinition.value.nodes.map(nodeDef => ({
+    vueFlowNodes.value = dag.nodes.map(nodeDef => ({
       id: nodeDef.id,
       type: 'dagCustom',
-      position: nodeDef.position,
+      position: { ...nodeDef.position },
       data: {
         ...nodeDef,
         runState: nodeStates.value.get(nodeDef.id),
@@ -66,13 +84,8 @@ export const useDAGStore = defineStore('dag', () => {
         registryMissing: regLoaded && !reg[nodeDef.type],
       },
     }))
-  })
 
-  // ─── 计算属性：Vue Flow 边数据 ───
-  const vueFlowEdges = computed(() => {
-    if (!dagDefinition.value) return []
-
-    return dagDefinition.value.edges.map(edgeDef => {
+    vueFlowEdges.value = dag.edges.map(edgeDef => {
       const flowKey = `${edgeDef.source}->${edgeDef.target}`
       const flow = edgeFlows.value.get(flowKey)
       const isActive = flow && (Date.now() - flow.timestamp < 2000)
@@ -93,7 +106,12 @@ export const useDAGStore = defineStore('dag', () => {
         },
       }
     })
-  })
+  }
+
+  // dagDefinition 变化时自动重建 flow 数据
+  watch(dagDefinition, () => rebuildFlowData(), { deep: true })
+  // nodeStates 变化时也刷新（SSE 状态更新需要反映到画布）
+  watch(nodeStates, () => rebuildFlowData(), { deep: true })
 
   // ─── 计算属性：DAG 统计 ───
   const dagStats = computed(() => {
@@ -264,19 +282,145 @@ export const useDAGStore = defineStore('dag', () => {
     viewMode.value = mode
   }
 
-  /** 更新节点运行参数（NodeEditorDrawer 使用，DAG 本身不提供编辑 UI） */
+  // ─── 编辑模式 Actions ───
+
+  function setEditMode(on: boolean) {
+    editMode.value = on
+  }
+
+  /** 添加节点到画布 */
+  function addNode(nodeType: string, position: { x: number; y: number }) {
+    const dag = dagDefinition.value
+    if (!dag) return
+
+    const meta = nodeTypeRegistry.value[nodeType]
+    const label = meta?.display_name ?? nodeType
+    const nodeId = uid(nodeType.replace(/^[a-z]+_/, 'n_'))
+
+    const newNode: NodeDefinition = {
+      id: nodeId,
+      type: nodeType,
+      label,
+      position,
+      enabled: true,
+      config: {
+        temperature: 0.7,
+        max_retries: meta?.default_max_retries ?? 1,
+        timeout_seconds: meta?.default_timeout_seconds ?? 60,
+      },
+    }
+
+    dagDefinition.value = {
+      ...dag,
+      nodes: [...dag.nodes, newNode],
+    }
+  }
+
+  /** 删除节点及其关联的所有边 */
+  function removeNode(nodeId: string) {
+    const dag = dagDefinition.value
+    if (!dag) return
+
+    dagDefinition.value = {
+      ...dag,
+      nodes: dag.nodes.filter(n => n.id !== nodeId),
+      edges: dag.edges.filter(e => e.source !== nodeId && e.target !== nodeId),
+    }
+
+    if (selectedNodeId.value === nodeId) {
+      selectedNodeId.value = null
+    }
+  }
+
+  /** 添加边 */
+  function addEdge(source: string, target: string, condition: string = 'always') {
+    const dag = dagDefinition.value
+    if (!dag) return
+
+    // 检查是否已存在相同边
+    const exists = dag.edges.some(e => e.source === source && e.target === target)
+    if (exists) return
+
+    const edgeId = uid('edge')
+
+    const newEdge: EdgeDefinition = {
+      id: edgeId,
+      source,
+      source_port: '',
+      target,
+      target_port: '',
+      condition: condition as any,
+      animated: condition !== 'always',
+    }
+
+    dagDefinition.value = {
+      ...dag,
+      edges: [...dag.edges, newEdge],
+    }
+  }
+
+  /** 删除边 */
+  function removeEdge(edgeId: string) {
+    const dag = dagDefinition.value
+    if (!dag) return
+
+    dagDefinition.value = {
+      ...dag,
+      edges: dag.edges.filter(e => e.id !== edgeId),
+    }
+  }
+
+  /** 更新节点位置 */
+  function updateNodePosition(nodeId: string, position: { x: number; y: number }) {
+    const dag = dagDefinition.value
+    if (!dag) return
+
+    dagDefinition.value = {
+      ...dag,
+      nodes: dag.nodes.map(n =>
+        n.id === nodeId ? { ...n, position } : n
+      ),
+    }
+  }
+
+  /** 保存 DAG 到后端 */
+  async function saveDAG(novelId: string) {
+    const dag = dagDefinition.value
+    if (!dag) throw new Error('没有可保存的 DAG')
+
+    isLoading.value = true
+    error.value = null
+    try {
+      const result = await dagApi.saveDAG(novelId, {
+        nodes: dag.nodes,
+        edges: dag.edges,
+        name: dag.name,
+        description: dag.description,
+      })
+      // 更新版本号
+      if (dagDefinition.value) {
+        dagDefinition.value = {
+          ...dagDefinition.value,
+          version: result.version,
+        }
+      }
+      return result
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : '保存 DAG 失败'
+      throw e
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** 更新节点运行参数（NodeEditorDrawer 使用） */
   async function updateNodeConfig(novelId: string, nodeId: string, config: Record<string, unknown>) {
     try {
-      // ★ 暂时直接更新内存中的 DAG 定义（不走数据库）
-      const node = dagDefinition.value?.nodes.find(n => n.id === nodeId)
-      if (node && dagDefinition.value) {
-        // 合并配置
-        if (config.temperature !== undefined) node.config.temperature = config.temperature as number
-        if (config.max_tokens !== undefined) node.config.max_tokens = config.max_tokens as number | null
-        if (config.timeout_seconds !== undefined) node.config.timeout_seconds = config.timeout_seconds as number
-        if (config.max_retries !== undefined) node.config.max_retries = config.max_retries as number
-        if (config.model_override !== undefined) node.config.model_override = config.model_override as string | null
-      }
+      // 调用后端 API 持久化
+      await dagApi.updateNodeConfig(novelId, nodeId, config)
+      // 刷新本地 DAG
+      const dag = await dagApi.getDAG(novelId)
+      dagDefinition.value = dag
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : '更新节点配置失败'
     }
@@ -289,7 +433,10 @@ export const useDAGStore = defineStore('dag', () => {
 
   async function loadNodePromptLive(novelId: string, nodeId: string) {
     try {
-      const result = await dagApi.getNodePromptLive(novelId, nodeId)
+      // 从本地 dagDefinition 查找节点类型，传给后端用于降级查询（未保存节点也能查注册表）
+      const nodeDef = dagDefinition.value?.nodes.find(n => n.id === nodeId)
+      const nodeType = nodeDef?.type
+      const result = await dagApi.getNodePromptLive(novelId, nodeId, nodeType)
       nodePromptLive.value.set(nodeId, result)
       return result
     } catch {
@@ -311,13 +458,14 @@ export const useDAGStore = defineStore('dag', () => {
     isLoading,
     error,
     viewMode,
+    editMode,
 
-    // Computed
+    // Computed / Ref
     vueFlowNodes,
     vueFlowEdges,
     dagStats,
 
-    // Actions
+    // Actions — 浏览模式
     hydrateDagForNovel,
     loadDAG,
     loadNodeTypeRegistry,
@@ -328,5 +476,15 @@ export const useDAGStore = defineStore('dag', () => {
     switchView,
     resetNodeStates,
     loadNodePromptLive,
+
+    // Actions — 编辑模式
+    setEditMode,
+    addNode,
+    removeNode,
+    addEdge,
+    removeEdge,
+    updateNodePosition,
+    saveDAG,
+    rebuildFlowData,
   }
 })

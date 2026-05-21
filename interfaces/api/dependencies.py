@@ -29,6 +29,7 @@ from infrastructure.persistence.database.sqlite_cast_repository import SqliteCas
 from infrastructure.persistence.database.sqlite_foreshadowing_repository import SqliteForeshadowingRepository
 from infrastructure.persistence.database.sqlite_timeline_repository import SqliteTimelineRepository
 from infrastructure.persistence.database.sqlite_confluence_point_repository import SqliteConfluencePointRepository
+from infrastructure.persistence.database.sqlite_dag_version_repository import SqliteDAGVersionRepository
 from infrastructure.ai.config.settings import Settings
 from infrastructure.ai.provider_factory import DynamicLLMService, LLMProviderFactory
 from application.ai.llm_control_service import LLMControlService
@@ -242,6 +243,16 @@ def get_beat_sheet_repository():
 @lru_cache(maxsize=None)
 def get_confluence_point_repository() -> SqliteConfluencePointRepository:
     return SqliteConfluencePointRepository(get_database())
+
+
+@lru_cache(maxsize=None)
+def get_dag_version_repository() -> SqliteDAGVersionRepository:
+    """获取 DAG 版本仓储（SQLite）
+
+    Returns:
+        SqliteDAGVersionRepository 实例
+    """
+    return SqliteDAGVersionRepository(get_database())
 
 
 def get_story_node_repository() -> StoryNodeRepository:

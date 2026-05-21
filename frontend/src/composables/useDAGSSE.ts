@@ -39,6 +39,9 @@ export function useDAGSSE(novelId: Ref<string>) {
   const runStore = useDAGRunStore()
   const isDev = import.meta.env.DEV
 
+  /** ★ 防止卸载后僵尸重连 */
+  let isMounted = false
+
   /** DAG 版本变化时重建 type→id，避免每条日志 O(n) 扫描 nodes */
   let typeToIdCacheVersion = -1
   let typeToIdCache: Map<string, string> | null = null
@@ -156,9 +159,9 @@ export function useDAGSSE(novelId: Ref<string>) {
    * 智能重连（指数退避）
    */
   function smartReconnect() {
+    if (!isMounted) return  // ★ 已卸载，不重连
     reconnectAttempts++
 
-    // 指数退避
     const delay = Math.min(
       RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts - 1),
       RECONNECT_MAX_DELAY_MS
@@ -169,6 +172,7 @@ export function useDAGSSE(novelId: Ref<string>) {
     }
 
     setTimeout(() => {
+      if (!isMounted) return  // ★ 定时器触发时再次检查
       if (novelId.value) {
         runStore.connectSSE(novelId.value)
         runStore.connectAutopilotLog(novelId.value, handleAutopilotLogEvent)
@@ -176,25 +180,17 @@ export function useDAGSSE(novelId: Ref<string>) {
     }, delay)
   }
 
-  // ─── 注册回调（使用优化的批量处理）───
+  // ─── 注册回调（存引用以便卸载时注销）───
 
-  runStore.onNodeStatusChange((event) => {
-    enqueueEvent(event)
-  })
+  const _onStatus = (event: NodeEvent) => enqueueEvent(event)
+  const _onOutput = (event: NodeEvent) => enqueueEvent(event)
+  const _onEdge = (event: NodeEvent) => enqueueEvent(event)
+  const _onComplete = () => { flushQueue(); dagStore.resetNodeStates() }
 
-  runStore.onNodeOutput((event) => {
-    enqueueEvent(event)
-  })
-
-  runStore.onEdgeFlow((event) => {
-    enqueueEvent(event)
-  })
-
-  runStore.onRunComplete(() => {
-    // 立即刷新队列
-    flushQueue()
-    dagStore.resetNodeStates()
-  })
+  runStore.onNodeStatusChange(_onStatus)
+  runStore.onNodeOutput(_onOutput)
+  runStore.onEdgeFlow(_onEdge)
+  runStore.onRunComplete(_onComplete)
 
   // SSE 连接状态监控
   watch(() => runStore.sseConnected, (connected) => {
@@ -218,6 +214,7 @@ export function useDAGSSE(novelId: Ref<string>) {
   // ─── 生命周期 ───
 
   onMounted(() => {
+    isMounted = true
     if (novelId.value) {
       runStore.connectSSE(novelId.value)
       runStore.connectAutopilotLog(novelId.value, handleAutopilotLogEvent)
@@ -226,6 +223,8 @@ export function useDAGSSE(novelId: Ref<string>) {
   })
 
   onUnmounted(() => {
+    isMounted = false  // ★ 阻止僵尸重连
+
     // 清理定时器
     if (throttleTimer) {
       clearTimeout(throttleTimer)
@@ -234,6 +233,12 @@ export function useDAGSSE(novelId: Ref<string>) {
 
     // 刷新剩余消息
     flushQueue()
+
+    // ★ 注销回调防止累积
+    runStore.offNodeStatusChange(_onStatus)
+    runStore.offNodeOutput(_onOutput)
+    runStore.offEdgeFlow(_onEdge)
+    runStore.offRunComplete(_onComplete)
 
     runStore.disconnectSSE()
     runStore.disconnectAutopilotLog()

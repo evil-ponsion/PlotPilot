@@ -12,13 +12,17 @@
       </div>
       <div class="menu-divider" />
 
-      <!-- ★ 精简操作项：只保留"查看详情"和"启禁用" -->
+      <!-- 操作项 -->
       <div class="menu-item" @click="$emit('detail', nodeId)">
         📋 查看详情
       </div>
       <div class="menu-divider" />
       <div class="menu-item" :class="{ 'menu-item-warning': nodeEnabled }" @click="$emit('toggle', nodeId)">
         {{ nodeEnabled ? '⛔ 禁用此节点' : '✅ 启用此节点' }}
+      </div>
+      <div v-if="editMode" class="menu-divider" />
+      <div v-if="editMode" class="menu-item menu-item-danger" @click="$emit('delete', nodeId)">
+        🗑️ 删除节点
       </div>
     </div>
   </Teleport>
@@ -41,9 +45,11 @@ defineEmits<{
   close: []
   detail: [nodeId: string]
   toggle: [nodeId: string]
+  delete: [nodeId: string]
 }>()
 
 const dagStore = useDAGStore()
+const editMode = computed(() => dagStore.editMode)
 
 const visible = computed(() => true)
 
@@ -102,6 +108,15 @@ const menuStyle = computed(() => {
 .menu-item-warning:hover {
   background: var(--color-warning-dim);
   color: var(--color-warning);
+}
+
+.menu-item-danger {
+  color: var(--color-danger);
+}
+
+.menu-item-danger:hover {
+  background: var(--color-danger-dim);
+  color: var(--color-danger);
 }
 
 .menu-divider {

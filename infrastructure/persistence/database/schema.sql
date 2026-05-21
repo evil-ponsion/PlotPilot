@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS chapters (
     outline TEXT,
     status TEXT DEFAULT 'draft',
     tension_score REAL DEFAULT 50.0,
+    dag_version_id TEXT,
+    dag_fingerprint TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE,

@@ -14,7 +14,7 @@
 
 export type NodeCategory = 'context' | 'execution' | 'validation' | 'gateway'
 export type NodeStatus = 'idle' | 'pending' | 'running' | 'success' | 'warning' | 'error' | 'bypassed' | 'disabled' | 'completed'
-export type EdgeCondition = 'on_success' | 'on_error' | 'on_drift_alert' | 'on_no_drift' | 'on_breaker_open' | 'on_breaker_closed' | 'on_review_approved' | 'on_review_rejected' | 'always'
+export type EdgeCondition = 'on_success' | 'on_error' | 'on_drift_alert' | 'on_no_drift' | 'on_breaker_open' | 'on_breaker_closed' | 'on_review_approved' | 'on_review_rejected' | 'on_switch_a' | 'on_switch_b' | 'on_switch_default' | 'always'
 export type PortDataType = 'text' | 'json' | 'score' | 'boolean' | 'list' | 'prompt'
 
 // ─── 端口 ───
@@ -164,12 +164,13 @@ export interface DAGRunResult {
 
 export interface NodePromptLive {
   node_id: string
-  node_type: string
+  node_type?: string
+  node_source?: 'dag' | 'registry_fallback' | 'error'
   cpms_node_key: string
   system: string
   user_template: string
   source: 'cpms' | 'config' | 'meta' | 'none'
-  variables: string[]
+  variables?: string[]
 }
 
 // ─── DAG ↔ CPMS 联动内核（GET /dag/registry/linkage）───

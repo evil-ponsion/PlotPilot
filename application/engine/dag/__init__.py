@@ -83,3 +83,44 @@ __all__ = [
     "EngineSelector",
     "PromptTemplateValidator",
 ]
+
+# ─── 流水线回调钩子 ───
+# 节点在 execute() 中通过此钩子向外部（API/SSE）发射事件
+# 用法：
+#   from application.engine.dag import pipeline_hook
+#   pipeline_hook.emit("beat_complete", {"beat_index": 1, "content": "..."})
+
+
+class PipelineHook:
+    """DAG 执行流水线回调钩子
+
+    允许节点在执行过程中发射事件，供外部（SSE、日志、监控）消费。
+    """
+
+    def __init__(self):
+        self._handlers: dict[str, list] = {}
+
+    def on(self, event: str, handler):
+        """注册事件处理器"""
+        self._handlers.setdefault(event, []).append(handler)
+
+    def off(self, event: str, handler):
+        """移除事件处理器"""
+        if event in self._handlers:
+            try:
+                self._handlers[event].remove(handler)
+            except ValueError:
+                pass
+
+    def emit(self, event: str, data: dict | None = None):
+        """发射事件"""
+        handlers = self._handlers.get(event, [])
+        for h in handlers:
+            try:
+                h(data or {})
+            except Exception:
+                pass
+
+
+pipeline_hook = PipelineHook()
+

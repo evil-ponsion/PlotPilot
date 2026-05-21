@@ -190,9 +190,11 @@ class WriterNode(BaseNode):
             content = ""
             word_count = 0
             novel_id = context.get("novel_id", "")
-
-            # 收集上下文变量
+            chapter_number = context.get("chapter_number", 0)
+            dag_run_id = context.get("dag_run_id", "unknown")
             beats = inputs.get("beats", []) or []
+
+            # ── 上下文变量 ──
             variables = {
                 "context": inputs.get("context", ""),
                 "outline": inputs.get("outline", ""),
@@ -200,60 +202,91 @@ class WriterNode(BaseNode):
                 "fact_lock": inputs.get("fact_lock", ""),
                 "foreshadowing_block": inputs.get("foreshadowing_block", ""),
                 "debt_due_block": inputs.get("debt_due_block", ""),
-                "planning_section": "",
-                # ★ Anti-AI 子注入变量（优先使用上游传来的，缺失时由 cpms_sub_keys 自动拉取）
                 "behavior_protocol": inputs.get("behavior_protocol", ""),
                 "character_state_lock": inputs.get("character_state_lock", ""),
                 "allowlist_block": inputs.get("allowlist_block", ""),
                 "nervous_habits": inputs.get("nervous_habits", ""),
-                "beat_extra": "",
-                "beat_section": "",
-                "prose_discipline": build_prose_discipline_block(
-                    beat_mode=bool(beats),
-                    beat_target_words=None,
-                ),
+                "beat_extra": "", "beat_section": "", "planning_section": "",
+                "prose_discipline": build_prose_discipline_block(beat_mode=bool(beats), beat_target_words=None),
             }
-
-            # ★ 使用 resolve_prompt 统一获取提示词（自动走 CPMS → Config → Meta + 子注入）
             resolved = self.resolve_prompt(variables)
 
-            # 调用 LLM 生成
-            try:
-                from domain.ai.services.llm_service import LLMService
-                from domain.ai.value_objects.prompt import Prompt
-                from domain.ai.services.llm_service import GenerationConfig
+            from domain.ai.services.llm_service import LLMService
+            from domain.ai.value_objects.prompt import Prompt
+            from domain.ai.services.llm_service import GenerationConfig
 
-                llm = LLMService()
+            llm = LLMService()
+
+            # ── 逐节拍生成 ──
+            if beats and isinstance(beats, list) and len(beats) > 0:
+                total_beats = len(beats)
+                for i, beat in enumerate(beats):
+                    # ★ 发射节拍开始事件
+                    self._emit_beat_event(novel_id, dag_run_id, "beat_start", {
+                        "beat_index": i + 1, "total_beats": total_beats,
+                        "focus": beat.get("focus", "") if isinstance(beat, dict) else "",
+                        "target_words": beat.get("target_words", 600) if isinstance(beat, dict) else 600,
+                    })
+
+                    beat_desc = beat.get("description", str(beat)) if isinstance(beat, dict) else str(beat)
+                    beat_focus = beat.get("focus", "mixed") if isinstance(beat, dict) else "mixed"
+                    beat_words = beat.get("target_words", 600) if isinstance(beat, dict) else 600
+
+                    beat_prompt_text = (
+                        f"{resolved['system']}\n\n"
+                        f"【当前节拍 {i + 1}/{total_beats}】{beat_desc}\n"
+                        f"焦点: {beat_focus} · 目标: ~{beat_words}字\n\n"
+                        f"{resolved.get('user', '') or '请开始写作'}"
+                    )
+                    beat_prompt = Prompt(system="", user=beat_prompt_text)
+                    beat_config = GenerationConfig(
+                        max_tokens=int(beat_words * 1.5),
+                        temperature=self._config.temperature if self._config and self._config.temperature is not None else 0.85,
+                    )
+
+                    try:
+                        result = await llm.generate(beat_prompt, beat_config)
+                        beat_text = (result.text if hasattr(result, 'text') else str(result)).strip()
+                    except Exception as e:
+                        logger.warning(f"节拍 {i+1} LLM 调用失败: {e}")
+                        beat_text = f"[节拍 {i+1} 生成失败]"
+
+                    if content:
+                        content += "\n\n" + beat_text
+                    else:
+                        content = beat_text
+
+                    # ★ 发射节拍完成事件
+                    self._emit_beat_event(novel_id, dag_run_id, "beat_complete", {
+                        "beat_index": i + 1, "total_beats": total_beats,
+                        "content": beat_text,
+                        "word_count": len(beat_text),
+                        "accumulated_words": len(content),
+                    })
+            else:
+                # 无节拍：一次性生成
+                self._emit_beat_event(novel_id, dag_run_id, "generation_start", {})
                 system_prompt = resolved["system"]
-                user_prompt = resolved["user"] or "请开始写作"
-
+                user_prompt = resolved.get("user", "") or "请开始写作"
                 prompt = Prompt(system=system_prompt, user=user_prompt)
-
-                # 根据是否有节拍，调整生成参数
-                config = GenerationConfig()
-                if beats and len(beats) > 0:
-                    config = GenerationConfig(
-                        max_tokens=2000,
-                        temperature=0.85,
-                    )
-                else:
-                    config = GenerationConfig(
-                        max_tokens=4000,
-                        temperature=0.80,
-                    )
-
-                # 应用用户配置覆盖
+                config = GenerationConfig(max_tokens=4000, temperature=0.80)
                 if self._config:
                     if self._config.temperature is not None:
                         config.temperature = self._config.temperature
                     if self._config.max_tokens is not None:
                         config.max_tokens = self._config.max_tokens
 
-                result = await llm.generate(prompt, config)
-                content = result.text if hasattr(result, 'text') else str(result)
-                word_count = len(content)
-            except Exception as e:
-                logger.warning(f"LLM 调用失败: {e}")
+                try:
+                    result = await llm.generate(prompt, config)
+                    content = (result.text if hasattr(result, 'text') else str(result)).strip()
+                except Exception as e:
+                    logger.warning(f"LLM 调用失败: {e}")
+
+                self._emit_beat_event(novel_id, dag_run_id, "generation_complete", {
+                    "word_count": len(content),
+                })
+
+            word_count = len(content)
 
             return NodeResult(
                 outputs={"content": content, "word_count": word_count},
@@ -263,6 +296,17 @@ class WriterNode(BaseNode):
             )
         except Exception as e:
             return NodeResult(outputs={}, status=NodeStatus.ERROR, duration_ms=int((time.time() - start) * 1000), error=str(e))
+
+    @staticmethod
+    def _emit_beat_event(novel_id: str, dag_run_id: str, event_type: str, data: dict):
+        """通过流水线钩子发射节拍事件"""
+        try:
+            from application.engine.dag import pipeline_hook
+            payload = {"novel_id": novel_id, "dag_run_id": dag_run_id, "type": event_type}
+            payload.update(data)
+            pipeline_hook.emit("beat_event", payload)
+        except Exception:
+            pass
 
     def validate_inputs(self, inputs: Dict[str, Any]) -> bool:
         return True

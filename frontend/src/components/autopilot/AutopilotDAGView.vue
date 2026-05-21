@@ -7,6 +7,7 @@
       :autopilot-status="autopilotStatus"
       :sse-connected="runStore.sseConnected"
       @switch-to-card="handleSwitchToCard"
+      @open-quality="qualityDashboardVisible = true"
     />
 
     <div v-if="dagStore.registryLinkageFailed" class="dag-banner">
@@ -57,6 +58,7 @@
       @close="contextMenu.visible = false"
       @detail="handleNodeDetail"
       @toggle="handleToggleNode"
+      @delete="handleDeleteNode"
     />
 
     <!-- ★ 节点详情弹窗（主界面居中弹窗，仿 Dify） -->
@@ -65,6 +67,27 @@
       :node-id="selectedDetailNodeId"
       :novel-id="novelId"
     />
+
+    <!-- ★ 上下文预览 -->
+    <ContextPreviewPanel
+      v-model:show="contextPreviewVisible"
+      :novel-id="novelId"
+    />
+
+    <!-- ★ 节拍规划 -->
+    <BeatPlannerPanel
+      v-model:show="beatPlannerVisible"
+      :novel-id="novelId"
+    />
+
+    <!-- ★ 生成监控面板（逐节拍实时） -->
+    <StreamingPanel ref="streamingPanelRef" :novel-id="novelId" />
+
+    <!-- ★ 审阅报告 -->
+    <ReviewPanel v-model:show="reviewPanelVisible" :novel-id="novelId" />
+
+    <!-- ★ 质量仪表盘 -->
+    <QualityDashboard v-model:show="qualityDashboardVisible" :novel-id="novelId" />
   </div>
 </template>
 
@@ -78,6 +101,11 @@ import DAGToolbar from './DAGToolbar.vue'
 import DAGCanvas from './DAGCanvas.vue'
 import NodeContextMenu from './NodeContextMenu.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
+import ContextPreviewPanel from './ContextPreviewPanel.vue'
+import BeatPlannerPanel from './BeatPlannerPanel.vue'
+import StreamingPanel from './StreamingPanel.vue'
+import ReviewPanel from './ReviewPanel.vue'
+import QualityDashboard from './QualityDashboard.vue'
 
 const props = defineProps<{
   novelId: string
@@ -103,6 +131,15 @@ const contextMenu = reactive({
 // ★ 节点详情弹窗
 const detailPanelVisible = ref(false)
 const selectedDetailNodeId = ref<string | null>(null)
+
+// ★ 生成前预览面板
+const contextPreviewVisible = ref(false)
+const beatPlannerVisible = ref(false)
+
+// ★ 生成监控面板
+const streamingPanelRef = ref<InstanceType<typeof StreamingPanel> | null>(null)
+const reviewPanelVisible = ref(false)
+const qualityDashboardVisible = ref(false)
 
 const gapSummary = computed(() =>
   dagStore.registryGaps.map(g => `${g.node_id} (${g.node_type})`).join('、'),
@@ -162,6 +199,28 @@ async function retryHydrate() {
   await fetchAutopilotStatus()
 }
 
+// ★ 监听 exec_writer 的 SSE 事件 → 转发到 StreamingPanel
+watch(
+  () => {
+    const writerId = dagStore.dagDefinition?.nodes.find(n => n.type === 'exec_writer')?.id
+    return writerId ? dagStore.nodeStates.get(writerId) : null
+  },
+  (state) => {
+    if (!state || !streamingPanelRef.value) return
+    const m = state.metrics || {}
+    const o = state.outputs || {}
+    const subtype = (o as any)?.subtype || ''
+    if (m.beat_index || subtype === 'beat_start' || subtype === 'generation_start') {
+      streamingPanelRef.value.handleBeatEvent({
+        subtype: subtype || (m.beat_index ? 'beat_start' : ''),
+        metrics: m,
+        outputs: o,
+      })
+    }
+  },
+  { deep: true },
+)
+
 onMounted(async () => {
   await dagStore.hydrateDagForNovel(props.novelId)
   await runStore.fetchStatus(props.novelId)
@@ -209,16 +268,33 @@ function handleCanvasContextMenu(event: MouseEvent, nodeId: string, enabled: boo
 
 // ─── 事件处理 ───
 
-/** ★ 单击节点 / 右键菜单"查看详情" → 打开主界面弹窗 */
+/** ★ 单击节点 → 根据节点类型路由到不同面板 */
 function handleNodeDetail(nodeId: string) {
-  selectedDetailNodeId.value = nodeId
-  detailPanelVisible.value = true
+  const node = dagStore.dagDefinition?.nodes.find(n => n.id === nodeId)
+  const nodeType = node?.type
+
+  if (nodeType === 'ctx_assembler') {
+    contextPreviewVisible.value = true
+  } else if (nodeType === 'exec_beat') {
+    beatPlannerVisible.value = true
+  } else if (nodeType === 'gw_review') {
+    reviewPanelVisible.value = true
+  } else {
+    selectedDetailNodeId.value = nodeId
+    detailPanelVisible.value = true
+  }
 }
 
 async function handleToggleNode(nodeId: string) {
   await dagStore.toggleNode(props.novelId, nodeId)
   const node = dagStore.dagDefinition?.nodes.find(n => n.id === nodeId)
   message.success(node?.enabled ? '节点已启用' : '节点已禁用')
+}
+
+function handleDeleteNode(nodeId: string) {
+  contextMenu.visible = false
+  dagStore.removeNode(nodeId)
+  message.success('节点已删除（点击保存以持久化）')
 }
 
 /** 切回「监控 · DAG」页的实时日志 */
