@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from application.engine.dag.models import (
     DAGDefinition,
+    EdgeCondition,
     EdgeDefinition,
     NodeConfig,
     NodeDefinition,
@@ -402,14 +403,15 @@ async def apply_template(novel_id: str, template_name: str):
 
 
 @router.post("/{novel_id}/new")
-async def new_blank_dag(novel_id: str):
+async def new_blank_dag(novel_id: str, name: str = "空白画布"):
     """创建空白 DAG（覆盖已有 DAG，保存为新版本）
 
     前端点击「新建」时调用，生成一个空节点/边的 DAG 作为编辑起点。
+    可选 ?name=xxx 指定工作流名称。
     """
     dag = DAGDefinition(
         id=f"dag_novel_{novel_id}",
-        name="空白画布",
+        name=name or "空白画布",
         description="从零开始编排",
         nodes=[],
         edges=[],
@@ -469,12 +471,13 @@ async def save_dag(novel_id: str, request: SaveDAGRequest):
         edges=edges,
     )
 
-    # 校验
-    from application.engine.dag.engine import DAGEngine
-    engine = DAGEngine()
-    errors = engine.validate(dag)
-    if errors:
-        raise HTTPException(status_code=400, detail={"message": "DAG 校验失败", "errors": errors})
+    # 校验（空 DAG 跳过）
+    if dag.nodes or dag.edges:
+        from application.engine.dag.engine import DAGEngine
+        engine = DAGEngine()
+        errors = engine.validate(dag)
+        if errors:
+            raise HTTPException(status_code=400, detail={"message": "DAG 校验失败", "errors": errors})
 
     # 持久化
     try:
@@ -491,21 +494,127 @@ async def save_dag(novel_id: str, request: SaveDAGRequest):
 
 @router.get("/{novel_id}/versions")
 async def list_dag_versions(novel_id: str):
-    """列出 DAG 版本历史"""
+    """列出可用工作流"""
     try:
         repo = get_dag_version_repository()
         versions = repo.list_versions(novel_id)
+
+        # v0：默认全流程 21 节点
+        default = get_default_dag()
+        versions.insert(0, {
+            "version": 0,
+            "name": "默认全流程",
+            "node_count": len(default.nodes),
+            "updated_at": "",
+        })
+
+        # v-1：精简全流程 17 节点（去掉 P1 新增的 ctx_characters/ctx_recent/ctx_storyline）
+        compact = _build_compact_dag()
+        versions.insert(0, {
+            "version": -1,
+            "name": "精简全流程（17节点）",
+            "node_count": len(compact.nodes),
+            "updated_at": "",
+        })
+
         return {"novel_id": novel_id, "versions": versions}
     except Exception as e:
         logger.error(f"获取 DAG 版本列表失败: novel={novel_id}, error={e}")
         raise HTTPException(status_code=500, detail=f"获取版本列表失败: {e}")
 
 
+def _build_compact_dag() -> DAGDefinition:
+    """17 节点 P0 原始版 — 去掉 P1 新增的 val_narrative/val_foreshadow/val_kg_infer"""
+    dag = DAGDefinition(
+        id="dag_compact_17",
+        name="单幕全流程（P0·17节点）",
+        version=1,
+        nodes=[
+            NodeDefinition(id="ctx_blueprint", type="ctx_blueprint", label="📋 剧本基建", position={"x": 100, "y": 100}),
+            NodeDefinition(id="ctx_memory", type="ctx_memory", label="🧠 记忆引擎", position={"x": 100, "y": 250}),
+            NodeDefinition(id="ctx_foreshadow", type="ctx_foreshadow", label="🪝 伏笔注入器", position={"x": 100, "y": 400}),
+            NodeDefinition(id="ctx_voice", type="ctx_voice", label="🎭 角色声线注入", position={"x": 100, "y": 550}),
+            NodeDefinition(id="ctx_debt", type="ctx_debt", label="💰 叙事债务", position={"x": 100, "y": 700}),
+            NodeDefinition(id="ctx_characters", type="ctx_characters", label="👤 角色档案", position={"x": 100, "y": 850}),
+            NodeDefinition(id="ctx_recent", type="ctx_recent", label="📖 前情提要", position={"x": 100, "y": 1000}),
+            NodeDefinition(id="ctx_storyline", type="ctx_storyline", label="🧭 主线进度", position={"x": 100, "y": 1150}),
+            NodeDefinition(id="ctx_assembler", type="ctx_assembler", label="🧩 上下文拼装", position={"x": 350, "y": 500}),
+            NodeDefinition(id="exec_beat", type="exec_beat", label="🥁 节拍放大器", position={"x": 500, "y": 200}),
+            NodeDefinition(id="exec_writer", type="exec_writer", label="✍️ 剧情引擎", position={"x": 800, "y": 300}),
+            NodeDefinition(id="val_style", type="val_style", label="🎭 文风警报器", position={"x": 1200, "y": 100}),
+            NodeDefinition(id="val_tension", type="val_tension", label="📈 张力评估器", position={"x": 1200, "y": 300}),
+            NodeDefinition(id="val_anti_ai", type="val_anti_ai", label="🛡️ Anti-AI 审计", position={"x": 1200, "y": 500}),
+            NodeDefinition(id="gw_circuit", type="gw_circuit", label="🔌 熔断保护", position={"x": 1500, "y": 300}),
+            NodeDefinition(id="gw_review", type="gw_review", label="⏸️ 审阅网关", position={"x": 1800, "y": 400}),
+            NodeDefinition(id="gw_retry", type="gw_retry", label="🔄 重写网关", position={"x": 1500, "y": 100}),
+        ],
+        edges=[
+            EdgeDefinition(id="edge_01", source="ctx_blueprint", target="exec_beat", source_port="world_rules"),
+            EdgeDefinition(id="edge_02", source="ctx_memory", target="exec_beat", source_port="fact_lock"),
+            EdgeDefinition(id="edge_03", source="ctx_foreshadow", target="ctx_assembler", source_port="foreshadowing_block"),
+            EdgeDefinition(id="edge_04", source="ctx_voice", target="ctx_assembler", source_port="voice_block"),
+            EdgeDefinition(id="edge_05", source="ctx_debt", target="ctx_assembler", source_port="debt_due_block"),
+            EdgeDefinition(id="edge_char", source="ctx_characters", target="ctx_assembler", source_port="character_block"),
+            EdgeDefinition(id="edge_rec", source="ctx_recent", target="ctx_assembler", source_port="previously_on"),
+            EdgeDefinition(id="edge_stl", source="ctx_storyline", target="ctx_assembler", source_port="storyline_block"),
+            EdgeDefinition(id="edge_06", source="exec_beat", target="ctx_assembler", source_port="beats"),
+            EdgeDefinition(id="edge_06b", source="ctx_assembler", target="exec_writer", source_port="context"),
+            EdgeDefinition(id="edge_07", source="exec_writer", target="val_style", source_port="content"),
+            EdgeDefinition(id="edge_08", source="exec_writer", target="val_tension", source_port="content"),
+            EdgeDefinition(id="edge_09", source="exec_writer", target="val_anti_ai", source_port="content"),
+            EdgeDefinition(id="edge_10", source="val_style", target="gw_circuit", condition=EdgeCondition.ON_NO_DRIFT),
+            EdgeDefinition(id="edge_11", source="val_style", target="gw_retry", condition=EdgeCondition.ON_DRIFT_ALERT, animated=True),
+            EdgeDefinition(id="edge_12", source="val_tension", target="gw_circuit"),
+            EdgeDefinition(id="edge_13", source="val_anti_ai", target="gw_circuit"),
+            EdgeDefinition(id="edge_14", source="gw_circuit", target="gw_review", condition=EdgeCondition.ON_BREAKER_CLOSED),
+            EdgeDefinition(id="edge_15", source="gw_retry", target="exec_writer", animated=True),
+        ],
+    )
+    return dag
+
+
+@router.delete("/{novel_id}/versions/{version}")
+async def delete_dag_version(novel_id: str, version: int):
+    """删除指定版本的 DAG"""
+    if version <= 0:
+        raise HTTPException(status_code=400, detail="内置工作流不可删除")
+    try:
+        from infrastructure.persistence.database.connection import get_database
+        db = get_database()
+        db.execute("DELETE FROM dag_versions WHERE novel_id = ? AND version = ?", (novel_id, version))
+        db.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        logger.error(f"删除版本失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+
 @router.get("/{novel_id}/versions/{version}")
 async def get_dag_version(novel_id: str, version: int):
     """获取指定版本的 DAG 定义"""
     try:
+        # 内置 DAG
+        if version == 0:
+            return get_default_dag().model_dump(mode="json")
+        if version == -1:
+            return _build_compact_dag().model_dump(mode="json")
+
         repo = get_dag_version_repository()
+
+        # 模板版本（10000+偏移，已废弃但保留兼容）
+        if version >= 10000:
+            from infrastructure.persistence.database.connection import get_database
+            db = get_database()
+            row = db.fetch_one(
+                "SELECT novel_id FROM dag_versions WHERE novel_id LIKE ? AND version = ?",
+                ("@tmpl:%", version - 10000)
+            )
+            if row:
+                dag = repo.get_by_version(row["novel_id"], version - 10000)
+                if dag:
+                    return dag.model_dump(mode="json")
+
+        # 普通版本
         dag = repo.get_by_version(novel_id, version)
         if dag is None:
             raise HTTPException(status_code=404, detail=f"版本 {version} 不存在")

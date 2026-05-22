@@ -526,11 +526,8 @@ class StorylineNode(BaseNode):
         cpms_node_key="context-storyline",
         description="从 Storyline/PlotArc/CausalEdge 组装主线进度上下文",
         default_edges=["exec_writer"],
-        default_dag_slot=DefaultDagSlot(
-            instance_id="ctx_storyline",
-            position={"x": 100, "y": 1150},
-            outgoing_to=["exec_writer"],
-        ),
+        # ctx_storyline 已在默认 DAG 中，无需 default_dag_slot
+        default_dag_slot=None,
     )
 
     async def execute(self, inputs: Dict[str, Any], context: Dict[str, Any]) -> NodeResult:

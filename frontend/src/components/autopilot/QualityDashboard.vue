@@ -32,7 +32,7 @@
           <div class="card-label">均字数</div>
         </div>
         <div class="overview-card">
-          <div class="card-value">{{ data.total_words.toLocaleString() }}</div>
+          <div class="card-value">{{ (data.total_words || 0).toLocaleString() }}</div>
           <div class="card-label">总字数 · {{ data.completed_chapters }}/{{ data.total_chapters }}章</div>
         </div>
       </div>

@@ -34,7 +34,7 @@
           style="margin-top: 6px"
         />
         <n-text depth="3" style="font-size: 11px">
-          Token 预算 {{ maxTokens.toLocaleString() }} / {{ data?.total_estimated_tokens || 0 }} 已用
+          Token 预算 {{ maxTokens?.toLocaleString?.() || 0 }} / {{ data?.total_estimated_tokens || 0 }} 已用
         </n-text>
       </div>
 

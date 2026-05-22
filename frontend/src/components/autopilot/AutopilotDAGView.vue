@@ -8,6 +8,7 @@
       :sse-connected="runStore.sseConnected"
       @switch-to-card="handleSwitchToCard"
       @open-quality="qualityDashboardVisible = true"
+      @dag-changed="emit('dag-changed')"
     />
 
     <div v-if="dagStore.registryLinkageFailed" class="dag-banner">
@@ -109,6 +110,10 @@ import QualityDashboard from './QualityDashboard.vue'
 
 const props = defineProps<{
   novelId: string
+}>()
+
+const emit = defineEmits<{
+  'dag-changed': []
 }>()
 
 const dagStore = useDAGStore()

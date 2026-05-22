@@ -99,6 +99,9 @@
         💾 保存
       </n-button>
 
+      <!-- 工作流信息 -->
+      <n-button size="tiny" secondary @click="infoMode = 'edit'; showInfoDialog = true">📝 信息</n-button>
+
       <!-- 新建空白 DAG -->
       <n-button
         size="tiny"
@@ -125,18 +128,50 @@
         v{{ dagStats.version || 1 }}
       </n-text>
     </div>
+
+    <TemplateLoadDialog
+      v-model:show="showTemplateDialog"
+      @confirm="handleLoadTemplateFromList"
+    />
+
+    <!-- 工作流信息编辑弹窗（编辑 / 新建共用） -->
+    <n-modal
+      :show="showInfoDialog"
+      preset="card"
+      :title="infoMode === 'new' ? '新建工作流' : '工作流信息'"
+      :style="{ maxWidth: '380px', width: '90vw' }"
+      :bordered="true"
+      @update:show="showInfoDialog = $event"
+    >
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <n-input v-model:value="infoName" placeholder="名称" maxlength="40" show-count />
+        <n-input
+          v-model:value="infoDescription"
+          type="textarea"
+          placeholder="简介（可选）"
+          maxlength="200"
+          :autosize="{ minRows: 2, maxRows: 4 }"
+        />
+      </div>
+      <template #footer>
+        <n-button size="small" @click="showInfoDialog = false">取消</n-button>
+        <n-button size="small" type="primary" @click="handleSaveInfo">
+          {{ infoMode === 'new' ? '创建' : '保存' }}
+        </n-button>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, h } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useDAGStore } from '@/stores/dagStore'
 import { dagApi } from '@/api/dag'
-import { useMessage, useDialog } from 'naive-ui'
+import { useMessage } from 'naive-ui'
+import TemplateLoadDialog from './TemplateLoadDialog.vue'
 
 const dagStore = useDAGStore()
 const message = useMessage()
-const dialog = useDialog()
 
 const registryGapCount = computed(() => dagStore.registryGaps.length)
 const linkageFailed = computed(() => dagStore.registryLinkageFailed)
@@ -158,9 +193,10 @@ const props = defineProps<{
   sseConnected: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'switch-to-card': []
   'open-quality': []
+  'dag-changed': []
 }>()
 
 // ─── 模板下拉选项 ───
@@ -172,22 +208,24 @@ const templateOptions = computed(() => [
 
 // ─── 编辑模式 ───
 
-function handleToggleEdit() {
-  dagStore.setEditMode(!editMode.value)
+async function handleToggleEdit() {
   if (editMode.value) {
-    message.info('已进入编辑模式，可拖拽节点、连线。完成后请点击保存。')
+    await handleSave()
+    dagStore.setEditMode(false)
   } else {
-    message.info('已退出编辑模式。')
+    dagStore.setEditMode(true)
   }
 }
 
 async function handleSave() {
+  if (isSaving.value) return  // 防重复调用
   isSaving.value = true
   try {
     const result = await dagStore.saveDAG(props.novelId)
     message.success(`DAG 已保存（v${result.version}）`)
+    emit('dag-changed')
   } catch {
-    message.error('保存失败，请检查节点和边的配置。')
+    message.error('保存失败')
   } finally {
     isSaving.value = false
   }
@@ -195,15 +233,9 @@ async function handleSave() {
 
 // ─── 新建空白 DAG ───
 
-async function handleNewBlank() {
-  try {
-    await dagApi.newBlankDAG(props.novelId)
-    await dagStore.loadDAG(props.novelId)
-    dagStore.setEditMode(true)
-    message.success('已创建空白画布，从左侧拖入节点开始编排')
-  } catch {
-    message.error('创建空白 DAG 失败')
-  }
+function handleNewBlank() {
+  infoMode.value = 'new'
+  showInfoDialog.value = true
 }
 
 // ─── 模板操作 ───
@@ -212,79 +244,83 @@ async function handleTemplateAction(key: string) {
   if (key === 'save-as-template') {
     await handleSaveAsTemplate()
   } else if (key === 'load-template') {
-    await handleLoadTemplate()
+    showTemplateDialog.value = true
   }
 }
 
 async function handleSaveAsTemplate() {
   const dag = dagStore.dagDefinition
-  if (!dag) {
-    message.warning('没有可保存的 DAG')
-    return
-  }
-
-  // 使用简单的 prompt 输入模板名
-  const name = prompt('请输入模板名称（英文/数字/下划线/中文）：')
-  if (!name) return
-  if (name === '默认全流程') {
-    message.warning('「默认全流程」是内置模板，请使用其他名称')
-    return
-  }
-
+  if (!dag) { message.warning('没有可保存的 DAG'); return }
+  const name = dag.name || '自定义工作流'
   try {
-    const result = await dagApi.saveTemplate({
-      name,
-      nodes: dag.nodes,
-      edges: dag.edges,
-      description: dag.description || '',
-    })
-    message.success(`模板「${result.name}」已保存（v${result.version}）`)
-  } catch {
-    message.error('保存模板失败')
+    await dagApi.saveTemplate({ name, nodes: dag.nodes as any, edges: dag.edges as any, description: dag.description || '' })
+    message.success(`模板「${name}」已保存`)
+    emit('dag-changed')
+  } catch { message.error('保存模板失败') }
+}
+
+const showTemplateDialog = ref(false)
+
+// ─── 工作流信息编辑（新建 / 编辑共用） ───
+const showInfoDialog = ref(false)
+const infoName = ref('')
+const infoDescription = ref('')
+const infoMode = ref<'new' | 'edit'>('edit')
+
+watch(showInfoDialog, (v) => {
+  if (!v) return
+  if (infoMode.value === 'edit') {
+    infoName.value = dagStore.dagDefinition?.name || ''
+    infoDescription.value = dagStore.dagDefinition?.description || ''
+  } else {
+    infoName.value = '自定义工作流'
+    infoDescription.value = ''
+  }
+})
+
+async function handleSaveInfo() {
+  const name = infoName.value.trim()
+  if (!name) { message.warning('请输入名称'); return }
+
+  if (infoMode.value === 'new') {
+    // 新建工作流
+    try {
+      await dagApi.newBlankDAG(props.novelId, name)
+      await dagStore.loadDAG(props.novelId)
+      const dag = dagStore.dagDefinition
+      if (dag) dag.description = infoDescription.value.trim() || dag.description
+      dagStore.setEditMode(true)
+      await dagStore.saveDAG(props.novelId)
+      showInfoDialog.value = false
+      message.success(`已创建「${name}」`)
+      emit('dag-changed')
+    } catch {
+      message.error('创建失败')
+    }
+  } else {
+    // 编辑工作流信息
+    const dag = dagStore.dagDefinition
+    if (!dag) return
+    dag.name = name
+    dag.description = infoDescription.value.trim()
+    showInfoDialog.value = false
+    try {
+      await dagStore.saveDAG(props.novelId)
+      message.success('工作流信息已更新')
+      emit('dag-changed')
+    } catch {
+      message.error('保存失败')
+    }
   }
 }
 
-async function handleLoadTemplate() {
+async function handleLoadTemplateFromList(name: string) {
   try {
-    const { templates } = await dagApi.listTemplates()
-
-    if (!templates || templates.length === 0) {
-      message.info('暂无可用模板，请先编辑并保存一个 DAG 为模板。')
-      return
-    }
-
-    const list = templates.map((t: any) => `  • ${t.name} — ${t.description || '无描述'} (${t.node_count}节点)`).join('\n')
-    const choice = prompt(`可用模板：\n${list}\n\n输入要加载的模板名称：`)
-    if (!choice) return
-
-    const template = templates.find(t => t.name === choice.trim())
-    if (!template) {
-      message.warning(`模板「${choice}」不存在，请检查名称是否与列表中一致`)
-      return
-    }
-
-    try {
-      await dagApi.applyTemplate(props.novelId, template.name)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      message.error(`应用模板失败: ${msg}`)
-      return
-    }
-
-    try {
-      await dagStore.loadDAG(props.novelId)
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
-      message.error(`刷新 DAG 失败: ${msg}`)
-      return
-    }
-
-    message.success(`已应用模板「${template.name}」`)
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    console.error('加载模板失败:', e)
-    message.error(`加载模板失败: ${msg}`)
-  }
+    await dagApi.applyTemplate(props.novelId, name)
+    await dagStore.loadDAG(props.novelId)
+    message.success(`已加载模板「${name}」`)
+    emit('dag-changed')
+  } catch { message.error('加载模板失败') }
 }
 </script>
 

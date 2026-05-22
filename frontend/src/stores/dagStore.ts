@@ -109,7 +109,7 @@ export const useDAGStore = defineStore('dag', () => {
   }
 
   // dagDefinition 变化时自动重建 flow 数据
-  watch(dagDefinition, () => rebuildFlowData(), { deep: true })
+  watch(dagDefinition, () => rebuildFlowData(), { deep: true, immediate: true })
   // nodeStates 变化时也刷新（SSE 状态更新需要反映到画布）
   watch(nodeStates, () => rebuildFlowData(), { deep: true })
 
@@ -153,13 +153,20 @@ export const useDAGStore = defineStore('dag', () => {
         dagApi.listNodeTypes(),
         dagApi.getRegistryLinkage(),
       ])
-      if (dagR.status === 'fulfilled') {
+      if (dagR.status === 'fulfilled' && dagR.value) {
         dagDefinition.value = dagR.value
         error.value = null
       } else {
-        dagDefinition.value = null
-        error.value =
-          dagR.reason instanceof Error ? dagR.reason.message : '加载 DAG 失败'
+        error.value = dagR.status === 'rejected'
+          ? (dagR.reason instanceof Error ? dagR.reason.message : '加载 DAG 失败')
+          : null
+        // 兜底：API 失败也显示默认空 DAG，画布不空白
+        if (!dagDefinition.value) {
+          dagDefinition.value = {
+            id: 'dag_fallback', name: '默认', version: 0, description: '',
+            nodes: [], edges: [], metadata: { created_at: '', updated_at: '', created_by: '' }
+          }
+        }
       }
       if (typesR.status === 'fulfilled') {
         nodeTypeRegistry.value = typesR.value.types
@@ -188,11 +195,18 @@ export const useDAGStore = defineStore('dag', () => {
     error.value = null
     try {
       const dag = await dagApi.getDAG(novelId)
-      dagDefinition.value = dag
+      if (dag) dagDefinition.value = dag
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : '加载 DAG 失败'
     } finally {
       isLoading.value = false
+      // 兜底：确保画布不空白
+      if (!dagDefinition.value) {
+        dagDefinition.value = {
+          id: 'dag_fallback', name: '默认', version: 0, description: '',
+          nodes: [], edges: [], metadata: { created_at: '', updated_at: '', created_by: '' }
+        }
+      }
     }
   }
 

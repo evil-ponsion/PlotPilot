@@ -3,7 +3,6 @@
     class="dag-canvas"
     :class="{ 'dag-canvas--edit': editMode }"
     @dragover.prevent="handleDragOver"
-    @drop="handleDrop"
   >
     <!-- 编辑模式下的节点面板 -->
     <NodePalette v-if="editMode" />

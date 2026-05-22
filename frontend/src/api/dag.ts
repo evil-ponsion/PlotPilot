@@ -18,9 +18,11 @@ import type {
 // ─── DAG 只读展示 ───
 
 export const dagApi = {
-  /** POST /api/v1/dag/{novel_id}/new — 创建空白 DAG */
-  newBlankDAG: (novelId: string) =>
-    apiClient.post<{ status: string; novel_id: string; version: number }>(`/dag/${novelId}/new`, {}) as unknown as Promise<{ status: string; novel_id: string; version: number }>,
+  /** POST /api/v1/dag/{novel_id}/new — 创建空白 DAG（可选 ?name=） */
+  newBlankDAG: (novelId: string, name?: string) =>
+    apiClient.post<{ status: string; novel_id: string; version: number }>(
+      `/dag/${novelId}/new${name ? `?name=${encodeURIComponent(name)}` : ''}`, {}
+    ) as unknown as Promise<{ status: string; novel_id: string; version: number }>,
 
   /** GET /api/v1/dag/{novel_id} — 获取当前 DAG 定义 */
   getDAG: (novelId: string) =>
@@ -33,6 +35,14 @@ export const dagApi = {
   /** GET /api/v1/dag/{novel_id}/versions — 获取版本历史 */
   listVersions: (novelId: string) =>
     apiClient.get<{ novel_id: string; versions: unknown[] }>(`/dag/${novelId}/versions`) as unknown as Promise<{ novel_id: string; versions: unknown[] }>,
+
+  /** GET /api/v1/dag/{novel_id}/versions/{version} — 获取指定版本 */
+  getDAGVersion: (novelId: string, version: number) =>
+    apiClient.get<DAGDefinition>(`/dag/${novelId}/versions/${version}`) as unknown as Promise<DAGDefinition>,
+
+  /** DELETE /api/v1/dag/{novel_id}/versions/{version} — 删除指定版本 */
+  deleteVersion: (novelId: string, version: number) =>
+    apiClient.delete<{ status: string }>(`/dag/${novelId}/versions/${version}`) as unknown as Promise<{ status: string }>,
 
   // ─── DAG 模板市场 ───
 

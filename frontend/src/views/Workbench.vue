@@ -2,36 +2,41 @@
   <div class="workbench">
     <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
 
-    <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
-      <div class="workbench-inner">
-        <n-split
-          direction="horizontal"
-          :min="WORKBENCH_SPLIT.sidebarMin"
-          :max="WORKBENCH_SPLIT.sidebarMax"
-          :default-size="WORKBENCH_SPLIT.sidebarDefault"
-        >
-          <template #1>
-            <ChapterList
-              ref="chapterListRef"
-              :slug="slug"
-              :chapters="chapters"
-              :current-chapter-id="currentChapterId"
-              :generation-prefs="generationPrefs"
-              @select="onSidebarChapterSelect"
-              @back="goHome"
-              @refresh="handleChapterUpdated"
-              @plan-act="handlePlanAct"
-            />
-          </template>
+    <div class="workbench-main">
+      <n-split
+        direction="horizontal"
+        :min="WORKBENCH_SPLIT.sidebarMin"
+        :max="WORKBENCH_SPLIT.sidebarMax"
+        :default-size="WORKBENCH_SPLIT.sidebarDefault"
+      >
+        <template #1>
+          <ChapterList
+            ref="chapterListRef"
+            :slug="slug"
+            :chapters="chapters"
+            :current-chapter-id="currentChapterId"
+            :generation-prefs="generationPrefs"
+            @select="onSidebarChapterSelect"
+            @back="goHome"
+            @refresh="handleChapterUpdated"
+            @plan-act="handlePlanAct"
+          />
+        </template>
 
-          <template #2>
-            <n-split
-              direction="horizontal"
-              :min="WORKBENCH_SPLIT.mainMin"
-              :max="WORKBENCH_SPLIT.mainMax"
-              :default-size="WORKBENCH_SPLIT.mainDefault"
-            >
-              <template #1>
+        <template #2>
+          <n-split
+            direction="horizontal"
+            :min="WORKBENCH_SPLIT.mainMin"
+            :max="WORKBENCH_SPLIT.mainMax"
+            :default-size="WORKBENCH_SPLIT.mainDefault"
+          >
+            <template #1>
+              <div class="main-column">
+                <WorkbenchToolbar
+                  :is-running="dagRunStatus === 'running'"
+                  @run="handleRunDAG"
+                  @save="handleSaveChapter"
+                />
                 <WorkArea
                   ref="workAreaRef"
                   :slug="slug"
@@ -43,30 +48,46 @@
                   :generation-prefs="generationPrefs"
                   @chapter-updated="handleChapterUpdated"
                 />
-              </template>
+                <div class="dag-resize-handle" @mousedown="startDAGResize" />
+                <div class="dag-bottom" :style="{ height: dagHeight + 'px' }">
+                  <div class="dag-bottom-head">
+                    <n-select
+                      v-model:value="activeWorkflow"
+                      :options="workflowOptions"
+                      size="tiny"
+                      style="width: 220px"
+                      @update:value="switchWorkflow"
+                    />
+                    <n-button size="tiny" secondary type="error" @click="deleteWorkflow">🗑️</n-button>
+                  </div>
+                  <div class="dag-bottom-body">
+                    <AutopilotDAGView :novel-id="novelId" @dag-changed="loadWorkflowOptions" />
+                  </div>
+                </div>
+              </div>
+            </template>
 
-              <template #2>
-                <SettingsPanel
-                  :slug="slug"
-                  :current-panel="rightPanel"
-                  :current-chapter="currentChapter"
-                  :generation-prefs="generationPrefs"
-                  @update:current-panel="onSettingsPanelChange"
-                />
-              </template>
-            </n-split>
-          </template>
-        </n-split>
-      </div>
-    </n-spin>
+            <template #2>
+              <SettingsPanel
+                :slug="slug"
+                :current-panel="rightPanel"
+                :current-chapter="currentChapter"
+                :generation-prefs="generationPrefs"
+                @update:current-panel="onSettingsPanelChange"
+              />
+            </template>
+          </n-split>
+        </template>
+      </n-split>
+    </div>
 
-    <!-- 幕→章 AI 规划弹层 -->
     <ActPlanningModal
       v-model:show="showActPlanning"
       :act-id="actPlanningId"
       :act-title="actPlanningTitle"
       @confirmed="handleChapterUpdated"
     />
+
   </div>
 </template>
 
@@ -79,10 +100,16 @@ import { useStatsStore } from '../stores/statsStore'
 import { useWorkbenchRefreshStore } from '../stores/workbenchRefreshStore'
 import { useAppSettingsShellStore } from '../stores/appSettingsShellStore'
 import StatsTopBar from '../components/stats/StatsTopBar.vue'
+import WorkbenchToolbar from '../components/workbench/WorkbenchToolbar.vue'
 import ChapterList from '../components/workbench/ChapterList.vue'
 import WorkArea from '../components/workbench/WorkArea.vue'
 import SettingsPanel from '../components/workbench/SettingsPanel.vue'
 import ActPlanningModal from '../components/workbench/ActPlanningModal.vue'
+import AutopilotDAGView from '../components/autopilot/AutopilotDAGView.vue'
+import { useDAGRunStore } from '../stores/dagRunStore'
+import { useDAGStore } from '../stores/dagStore'
+import { dagApi } from '../api/dag'
+
 import {
   WORKBENCH_CHAPTER_DESK_CHANGE_EVENT,
   WORKBENCH_OPEN_SETTINGS_PANEL_EVENT,
@@ -96,6 +123,91 @@ const message = useMessage()
 const statsStore = useStatsStore()
 const workbenchRefresh = useWorkbenchRefreshStore()
 const appSettingsShell = useAppSettingsShellStore()
+const dagRun = useDAGRunStore()
+const dagStore = useDAGStore()
+const dagRunStatus = computed(() => dagRun.runStatus)
+const novelId = computed(() => slug.value)
+
+const showDAG = ref(true)
+const dagHeight = ref(300)
+let dagResizeStart = 0
+let dagResizeStartHeight = 0
+
+
+
+
+function startDAGResize(e: MouseEvent) {
+  dagResizeStart = e.clientY
+  dagResizeStartHeight = dagHeight.value
+  document.addEventListener('mousemove', onDAGResize)
+  document.addEventListener('mouseup', stopDAGResize)
+}
+
+function onDAGResize(e: MouseEvent) {
+  const delta = dagResizeStart - e.clientY
+  dagHeight.value = Math.max(120, Math.min(window.innerHeight * 0.6, dagResizeStartHeight + delta))
+}
+
+function stopDAGResize() {
+  document.removeEventListener('mousemove', onDAGResize)
+  document.removeEventListener('mouseup', stopDAGResize)
+}
+
+function handleRunDAG() {
+  if (dagRunStatus.value === 'running') {
+    dagRun.stopRun(novelId.value)
+  } else {
+    dagRun.startRun(novelId.value)
+  }
+}
+
+async function handleSaveChapter() {
+  message.success('章节已保存')
+}
+
+// ─── 工作流下拉框 ───
+const activeWorkflow = ref('')
+const workflowOptions = ref<Array<{ label: string; value: string }>>([])
+
+async function loadWorkflowOptions() {
+  try {
+    const verRes: any = await dagApi.listVersions(novelId.value)
+    const versions: any[] = verRes?.versions || []
+    workflowOptions.value = versions.map((v: any) => ({
+      label: `${v.name} (${v.node_count}节点)`,
+      value: String(v.version),
+    }))
+
+    // 自动选择：优先当前 dagStore 版本，否则第一个
+    const cur = dagStore.dagDefinition?.version
+    const match = workflowOptions.value.find(o => o.value === String(cur ?? ''))
+    if (match) {
+      activeWorkflow.value = match.value
+    } else if (workflowOptions.value.length > 0) {
+      activeWorkflow.value = workflowOptions.value[0].value
+    }
+  } catch { /* 静默 */ }
+}
+
+async function switchWorkflow(value: string) {
+  const version = parseInt(value)
+  if (isNaN(version)) return
+  try {
+    const dag = await dagApi.getDAGVersion(novelId.value, version)
+    if (dag) dagStore.dagDefinition = dag
+  } catch { /* 静默 */ }
+}
+
+async function deleteWorkflow() {
+  const v = parseInt(activeWorkflow.value)
+  if (isNaN(v) || v <= 0) { message.warning('内置工作流不可删除'); return }
+  try {
+    await dagApi.deleteVersion(novelId.value, v)
+    await dagStore.loadDAG(novelId.value)
+    loadWorkflowOptions()
+    message.success('已删除')
+  } catch { message.error('删除失败') }
+}
 
 const slug = computed(() => String(route.params.slug ?? ''))
 
@@ -203,6 +315,8 @@ onMounted(async () => {
   try {
     await loadDesk()
     await syncChapterFromRoute()
+    dagStore.loadDAG(slug.value).catch(() => {})
+    loadWorkflowOptions()
   } catch {
     message.error('加载失败，请检查网络与后端是否已启动')
     bookTitle.value = slug.value
@@ -228,6 +342,10 @@ watch(
   }
 )
 
+watch(() => dagStore.dagDefinition?.version, () => {
+  loadWorkflowOptions()
+})
+
 watch(
   slug,
   async (next, prev) => {
@@ -238,6 +356,8 @@ watch(
       void statsStore.loadBookStats(next, true).catch(() => {})
       chapterListRef.value?.refreshStoryTree?.()
       workbenchRefresh.bumpAfterChapterDeskChange()
+      dagStore.loadDAG(next).catch(() => {})
+      loadWorkflowOptions()
     } catch {
       message.error('切换作品失败，请检查网络与后端是否已启动')
       bookTitle.value = next
@@ -249,48 +369,79 @@ watch(
 <style scoped>
 .workbench {
   height: 100vh;
-  min-height: 0;
-  max-height: 100vh;
   overflow: hidden;
   background: var(--app-page-bg, #f0f2f8);
   display: flex;
   flex-direction: column;
 }
 
-.workbench-spin {
+.workbench-main {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
-.workbench-spin :deep(.n-spin-content) {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.workbench-inner {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.workbench-inner :deep(.n-split) {
-  flex: 1;
-  min-height: 0;
+.workbench-main :deep(.n-split) {
   height: 100%;
 }
 
-.workbench-inner :deep(.n-split-pane-1),
-.workbench-inner :deep(.n-split-pane-2) {
+.workbench-main :deep(.n-split-pane-1),
+.workbench-main :deep(.n-split-pane-2) {
   min-height: 0;
   overflow: hidden;
 }
+
+.main-column {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.main-column > :nth-child(2) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dag-resize-handle {
+  height: 2px;
+  cursor: row-resize;
+  background: var(--app-border);
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.dag-resize-handle:hover {
+  background: var(--color-brand);
+}
+
+.dag-bottom {
+  min-height: 120px;
+  border-top: 2px solid var(--app-border);
+  overflow: hidden;
+  background: var(--dag-canvas-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.dag-bottom-head {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--app-divider-light);
+  background: var(--dag-toolbar-bg);
+  flex-shrink: 0;
+}
+
+.dag-bottom-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.dag-bottom-body > :deep(.dag-view-container) {
+  position: absolute;
+  inset: 0;
+}
+
 </style>
