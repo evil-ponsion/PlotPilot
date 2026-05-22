@@ -7,7 +7,9 @@
         direction="horizontal"
         :min="WORKBENCH_SPLIT.sidebarMin"
         :max="WORKBENCH_SPLIT.sidebarMax"
+        :size="sidebarSize"
         :default-size="WORKBENCH_SPLIT.sidebarDefault"
+        @update:size="onSidebarResize"
       >
         <template #1>
           <ChapterList
@@ -28,13 +30,18 @@
             direction="horizontal"
             :min="WORKBENCH_SPLIT.mainMin"
             :max="WORKBENCH_SPLIT.mainMax"
+            :size="mainSize"
             :default-size="WORKBENCH_SPLIT.mainDefault"
+            @update:size="onMainResize"
           >
             <template #1>
               <div class="main-column">
                 <WorkbenchToolbar
-                  :is-running="dagRunStatus === 'running'"
-                  @run="handleRunDAG"
+                  :autopilot-running="dagRunStatus === 'running'"
+                  @autopilot="handleRunDAG"
+                  @quick-generate="handleQuickGenerate"
+                  @regenerate="handleRegenerate"
+                  @tension-diagnosis="handleTensionDiagnosis"
                   @save="handleSaveChapter"
                 />
                 <WorkArea
@@ -48,9 +55,9 @@
                   :generation-prefs="generationPrefs"
                   @chapter-updated="handleChapterUpdated"
                 />
-                <div class="dag-resize-handle" @mousedown="startDAGResize" />
-                <div class="dag-bottom" :style="{ height: dagHeight + 'px' }">
-                  <div class="dag-bottom-head">
+                <div v-if="!dagCollapsed" class="dag-resize-handle" @mousedown="startDAGResize" />
+                <div class="dag-bottom" :class="{ 'dag-collapsed': dagCollapsed }" :style="dagPanelStyle">
+                  <div class="dag-bottom-head" @dblclick="dagCollapsed = !dagCollapsed">
                     <n-select
                       v-model:value="activeWorkflow"
                       :options="workflowOptions"
@@ -59,8 +66,11 @@
                       @update:value="switchWorkflow"
                     />
                     <n-button size="tiny" secondary type="error" @click="deleteWorkflow">🗑️</n-button>
+                    <n-button size="tiny" quaternary @click="dagCollapsed = !dagCollapsed">
+                      {{ dagCollapsed ? '▲' : '▼' }}
+                    </n-button>
                   </div>
-                  <div class="dag-bottom-body">
+                  <div v-show="!dagCollapsed" class="dag-bottom-body">
                     <AutopilotDAGView :novel-id="novelId" @dag-changed="loadWorkflowOptions" />
                   </div>
                 </div>
@@ -129,9 +139,27 @@ const dagRunStatus = computed(() => dagRun.runStatus)
 const novelId = computed(() => slug.value)
 
 const showDAG = ref(true)
-const dagHeight = ref(300)
+const dagCollapsed = ref(false)
+const dagHeight = ref(Number(localStorage.getItem('dag-panel-height') ?? 300))
+const dagPanelStyle = computed(() => ({
+  height: dagCollapsed.value ? '34px' : dagHeight.value + 'px',
+}))
 let dagResizeStart = 0
 let dagResizeStartHeight = 0
+
+// 左右分栏宽度持久化
+const sidebarSize = ref(Number(localStorage.getItem('panel-sidebar') ?? WORKBENCH_SPLIT.sidebarDefault))
+const mainSize = ref(Number(localStorage.getItem('panel-main') ?? WORKBENCH_SPLIT.mainDefault))
+
+function onSidebarResize(size: number) {
+  sidebarSize.value = size
+  localStorage.setItem('panel-sidebar', String(size))
+}
+
+function onMainResize(size: number) {
+  mainSize.value = size
+  localStorage.setItem('panel-main', String(size))
+}
 
 
 
@@ -151,6 +179,7 @@ function onDAGResize(e: MouseEvent) {
 function stopDAGResize() {
   document.removeEventListener('mousemove', onDAGResize)
   document.removeEventListener('mouseup', stopDAGResize)
+  localStorage.setItem('dag-panel-height', String(dagHeight.value))
 }
 
 function handleRunDAG() {
@@ -163,6 +192,18 @@ function handleRunDAG() {
 
 async function handleSaveChapter() {
   message.success('章节已保存')
+}
+
+function handleQuickGenerate() {
+  workAreaRef.value?.triggerQuickGenerate()
+}
+
+function handleRegenerate() {
+  workAreaRef.value?.triggerRegenerate()
+}
+
+function handleTensionDiagnosis() {
+  workAreaRef.value?.triggerTensionDiagnosis()
 }
 
 // ─── 工作流下拉框 ───
@@ -194,7 +235,11 @@ async function switchWorkflow(value: string) {
   if (isNaN(version)) return
   try {
     const dag = await dagApi.getDAGVersion(novelId.value, version)
-    if (dag) dagStore.dagDefinition = dag
+    if (dag) {
+      // 把虚拟版本号写回，防止 loadWorkflowOptions 根据真实 version 跳回顶部
+      dag.version = version
+      dagStore.dagDefinition = dag
+    }
   } catch { /* 静默 */ }
 }
 
@@ -442,6 +487,15 @@ watch(
 .dag-bottom-body > :deep(.dag-view-container) {
   position: absolute;
   inset: 0;
+}
+
+.dag-collapsed {
+  min-height: 0;
+  border-top: 1px solid var(--app-border);
+}
+
+.dag-collapsed .dag-bottom-head {
+  border-bottom: none;
 }
 
 </style>

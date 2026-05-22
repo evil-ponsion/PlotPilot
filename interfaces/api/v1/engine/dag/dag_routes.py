@@ -512,7 +512,7 @@ async def list_dag_versions(novel_id: str):
         compact = _build_compact_dag()
         versions.insert(0, {
             "version": -1,
-            "name": "精简全流程（17节点）",
+            "name": "精简全流程（16节点）",
             "node_count": len(compact.nodes),
             "updated_at": "",
         })
@@ -524,10 +524,10 @@ async def list_dag_versions(novel_id: str):
 
 
 def _build_compact_dag() -> DAGDefinition:
-    """17 节点 P0 原始版 — 去掉 P1 新增的 val_narrative/val_foreshadow/val_kg_infer"""
+    """16 节点精简版 — 21 节点去掉 ctx_characters/ctx_recent/ctx_storyline/ctx_assembler"""
     dag = DAGDefinition(
-        id="dag_compact_17",
-        name="单幕全流程（P0·17节点）",
+        id="dag_compact_16",
+        name="单幕全流程（16节点）",
         version=1,
         nodes=[
             NodeDefinition(id="ctx_blueprint", type="ctx_blueprint", label="📋 剧本基建", position={"x": 100, "y": 100}),
@@ -535,39 +535,47 @@ def _build_compact_dag() -> DAGDefinition:
             NodeDefinition(id="ctx_foreshadow", type="ctx_foreshadow", label="🪝 伏笔注入器", position={"x": 100, "y": 400}),
             NodeDefinition(id="ctx_voice", type="ctx_voice", label="🎭 角色声线注入", position={"x": 100, "y": 550}),
             NodeDefinition(id="ctx_debt", type="ctx_debt", label="💰 叙事债务", position={"x": 100, "y": 700}),
-            NodeDefinition(id="ctx_characters", type="ctx_characters", label="👤 角色档案", position={"x": 100, "y": 850}),
-            NodeDefinition(id="ctx_recent", type="ctx_recent", label="📖 前情提要", position={"x": 100, "y": 1000}),
-            NodeDefinition(id="ctx_storyline", type="ctx_storyline", label="🧭 主线进度", position={"x": 100, "y": 1150}),
-            NodeDefinition(id="ctx_assembler", type="ctx_assembler", label="🧩 上下文拼装", position={"x": 350, "y": 500}),
             NodeDefinition(id="exec_beat", type="exec_beat", label="🥁 节拍放大器", position={"x": 500, "y": 200}),
-            NodeDefinition(id="exec_writer", type="exec_writer", label="✍️ 剧情引擎", position={"x": 800, "y": 300}),
-            NodeDefinition(id="val_style", type="val_style", label="🎭 文风警报器", position={"x": 1200, "y": 100}),
-            NodeDefinition(id="val_tension", type="val_tension", label="📈 张力评估器", position={"x": 1200, "y": 300}),
+            NodeDefinition(id="exec_writer", type="exec_writer", label="✍️ 剧情引擎", position={"x": 800, "y": 300},
+                config=NodeConfig(prompt_template="写作姿态：回忆并讲述这段事；避免写成交差用的说明文。\n\n{{context}}\n{{outline}}\n{{voice_block}}",
+                    prompt_variables={"context": "", "outline": "", "voice_block": ""})),
+            NodeDefinition(id="val_style", type="val_style", label="🎭 文风警报器", position={"x": 1200, "y": 100},
+                config=NodeConfig(thresholds={"drift_warning": 0.5, "drift_critical": 0.75})),
+            NodeDefinition(id="val_tension", type="val_tension", label="📈 张力评估器", position={"x": 1200, "y": 300},
+                config=NodeConfig(thresholds={"tension_floor": 30, "tension_ceiling": 85})),
             NodeDefinition(id="val_anti_ai", type="val_anti_ai", label="🛡️ Anti-AI 审计", position={"x": 1200, "y": 500}),
-            NodeDefinition(id="gw_circuit", type="gw_circuit", label="🔌 熔断保护", position={"x": 1500, "y": 300}),
-            NodeDefinition(id="gw_review", type="gw_review", label="⏸️ 审阅网关", position={"x": 1800, "y": 400}),
-            NodeDefinition(id="gw_retry", type="gw_retry", label="🔄 重写网关", position={"x": 1500, "y": 100}),
+            NodeDefinition(id="gw_circuit", type="gw_circuit", label="🔌 熔断保护", position={"x": 1500, "y": 300},
+                config=NodeConfig(thresholds={"max_errors": 3})),
+            NodeDefinition(id="gw_retry", type="gw_retry", label="🔄 重写网关", position={"x": 1500, "y": 100},
+                config=NodeConfig(max_retries=2)),
+            NodeDefinition(id="val_narrative", type="val_narrative", label="🧬 叙事同步", position={"x": 1800, "y": 200}),
+            NodeDefinition(id="val_foreshadow", type="val_foreshadow", label="📖 伏笔雷达", position={"x": 1800, "y": 400}),
+            NodeDefinition(id="val_kg_infer", type="val_kg_infer", label="🕸️ KG推断", position={"x": 1800, "y": 600}),
+            NodeDefinition(id="gw_review", type="gw_review", label="⏸️ 审阅网关", position={"x": 2100, "y": 400}),
         ],
         edges=[
+            # ctx → exec_beat → exec_writer
             EdgeDefinition(id="edge_01", source="ctx_blueprint", target="exec_beat", source_port="world_rules"),
             EdgeDefinition(id="edge_02", source="ctx_memory", target="exec_beat", source_port="fact_lock"),
-            EdgeDefinition(id="edge_03", source="ctx_foreshadow", target="ctx_assembler", source_port="foreshadowing_block"),
-            EdgeDefinition(id="edge_04", source="ctx_voice", target="ctx_assembler", source_port="voice_block"),
-            EdgeDefinition(id="edge_05", source="ctx_debt", target="ctx_assembler", source_port="debt_due_block"),
-            EdgeDefinition(id="edge_char", source="ctx_characters", target="ctx_assembler", source_port="character_block"),
-            EdgeDefinition(id="edge_rec", source="ctx_recent", target="ctx_assembler", source_port="previously_on"),
-            EdgeDefinition(id="edge_stl", source="ctx_storyline", target="ctx_assembler", source_port="storyline_block"),
-            EdgeDefinition(id="edge_06", source="exec_beat", target="ctx_assembler", source_port="beats"),
-            EdgeDefinition(id="edge_06b", source="ctx_assembler", target="exec_writer", source_port="context"),
+            # ctx 直连 exec_writer（无 assembler）
+            EdgeDefinition(id="edge_03", source="ctx_foreshadow", target="exec_writer", source_port="foreshadowing_block"),
+            EdgeDefinition(id="edge_04", source="ctx_voice", target="exec_writer", source_port="voice_block"),
+            EdgeDefinition(id="edge_05", source="ctx_debt", target="exec_writer", source_port="debt_due_block"),
+            EdgeDefinition(id="edge_06", source="exec_beat", target="exec_writer", source_port="beats"),
+            # exec_writer → 验证层
             EdgeDefinition(id="edge_07", source="exec_writer", target="val_style", source_port="content"),
             EdgeDefinition(id="edge_08", source="exec_writer", target="val_tension", source_port="content"),
             EdgeDefinition(id="edge_09", source="exec_writer", target="val_anti_ai", source_port="content"),
+            # 网关层
             EdgeDefinition(id="edge_10", source="val_style", target="gw_circuit", condition=EdgeCondition.ON_NO_DRIFT),
             EdgeDefinition(id="edge_11", source="val_style", target="gw_retry", condition=EdgeCondition.ON_DRIFT_ALERT, animated=True),
             EdgeDefinition(id="edge_12", source="val_tension", target="gw_circuit"),
             EdgeDefinition(id="edge_13", source="val_anti_ai", target="gw_circuit"),
-            EdgeDefinition(id="edge_14", source="gw_circuit", target="gw_review", condition=EdgeCondition.ON_BREAKER_CLOSED),
+            EdgeDefinition(id="edge_14", source="gw_circuit", target="val_narrative", condition=EdgeCondition.ON_BREAKER_CLOSED),
             EdgeDefinition(id="edge_15", source="gw_retry", target="exec_writer", animated=True),
+            EdgeDefinition(id="edge_16", source="val_narrative", target="val_foreshadow"),
+            EdgeDefinition(id="edge_17", source="val_foreshadow", target="val_kg_infer"),
+            EdgeDefinition(id="edge_18", source="val_kg_infer", target="gw_review"),
         ],
     )
     return dag

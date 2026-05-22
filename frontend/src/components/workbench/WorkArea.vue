@@ -2,8 +2,8 @@
   <div class="work-area">
     <header class="work-header">
       <div class="work-title-wrap">
-        <h2 class="work-title">{{ bookTitle || slug }}</h2>
-        <n-text depth="3" class="work-sub">{{ slug }}</n-text>
+        <h2 class="work-title">{{ currentTitle || '选择章节开始写作' }}</h2>
+        <n-text depth="3" class="work-sub">{{ bookTitle || slug }}</n-text>
       </div>
       <div class="work-mode-switch" role="group" aria-label="创作模式">
         <n-switch
@@ -71,16 +71,8 @@
           <template #primary>
             <div class="work-main primary-desk-root">
               <n-empty v-if="!currentChapter" description="请从左侧选择章节" class="work-empty" />
-              <n-tabs
-                v-else
-                v-model:value="primaryDeskTab"
-                type="line"
-                size="small"
-                animated
-                class="primary-desk-tabs"
-              >
-                <n-tab-pane name="manuscript" tab="章节编辑" display-directive="if">
-                  <div class="chapter-editor">
+              <template v-else>
+                <div class="chapter-editor">
                 <div class="editor-header">
                   <div class="editor-title">
                     <h3>{{ currentChapter.title || deskChapterTitle }}</h3>
@@ -122,6 +114,9 @@
                       :readonly="isAssistedReadOnly || (isAutopilotRunning && streamingChapterNumber === currentChapter.number)"
                       @update:value="handleContentChange"
                     />
+                    <span class="editor-wordcount-badge">
+                      {{ wordCount }} 字
+                    </span>
                     <div
                       v-if="isAutopilotRunning && streamingChapterNumber === currentChapter.number && streamingContent"
                       class="streaming-cursor-overlay"
@@ -131,104 +126,15 @@
                     </div>
                   </div>
                 </div>
-
-                <div class="editor-footer">
-                  <n-space :size="8" align="center" justify="space-between" style="width: 100%">
-                    <n-space vertical :size="4" style="min-width: 0">
-                    <n-text depth="3" class="editor-wordcount-line">
-                      <template
-                        v-if="
-                          isAutopilotRunning &&
-                          streamingChapterNumber === currentChapter?.number &&
-                          streamingContent &&
-                          streamingWordCountHint
-                        "
-                      >
-                        <span :class="{ 'streaming-word-count': true }">{{ streamingWordCountHint }}</span>
-                        <n-tooltip trigger="hover" placement="top">
-                          <template #trigger>
-                            <span class="wordcount-help">?</span>
-                          </template>
-                          流式阶段模型常会写出超过单章目标的缓冲，系统在每节拍末会收束；落稿字数会贴近你在书目里设的「每章目标字数」。
-                        </n-tooltip>
-                        <span class="streaming-indicator">生成中</span>
-                      </template>
-                      <template v-else>
-                        字数:
-                        <span :class="{ 'streaming-word-count': isAutopilotRunning && streamingChapterNumber === currentChapter?.number && streamingContent }">
-                          {{ wordCount }}
-                        </span>
-                        <span v-if="isAutopilotRunning && streamingChapterNumber === currentChapter?.number && streamingContent" class="streaming-indicator">生成中▋</span>
-                      </template>
-                    </n-text>
-                    <n-text depth="3" style="font-size: 11px; max-width: 56ch; line-height: 1.45">
-                      实体标记（可选）：
-                      <code>[[char:id|人名]] [[loc:id|地名]] [[faction:id|势力]] [[prop:id|道具]]</code>
-                      · 保存后自动索引本章实体，侧栏「手稿道具」可查看。
-                    </n-text>
-                    </n-space>
-                    <n-space :size="8">
-                      <n-tooltip trigger="hover" :disabled="!isAutopilotRunning && !isAssistedReadOnly">
-                        <template #trigger>
-                          <n-button
-                            size="small"
-                            secondary
-                            @click="handleGenerateChapter"
-                            :loading="generating"
-                            :disabled="isAutopilotRunning || isAssistedReadOnly"
-                          >
-                            ⚡ 快速生成
-                          </n-button>
-                        </template>
-                        <span>{{ isAssistedReadOnly ? '托管运行中不可手动生成' : 'Autopilot 运行时禁用手动生成' }}</span>
-                      </n-tooltip>
-                      <n-tooltip
-                        v-if="hasChapterContent"
-                        trigger="hover"
-                        :disabled="!isAutopilotRunning && !isAssistedReadOnly"
-                        :content="isAssistedReadOnly ? '托管运行中不可重新生成' : 'Autopilot 运行时禁用'"
-                      >
-                        <template #trigger>
-                          <n-button
-                            size="small"
-                            secondary
-                            @click="handleRegenerateChapter"
-                            :loading="generating"
-                            :disabled="isAutopilotRunning || isAssistedReadOnly"
-                          >
-                            🔄 重新生成
-                          </n-button>
-                        </template>
-                      </n-tooltip>
-                      <n-button size="small" secondary :disabled="isAssistedReadOnly" @click="openTensionModal" title="诊断当前章节张力缺口">
-                        🔍 张力诊断
-                      </n-button>
-                    </n-space>
-                  </n-space>
-                </div>
-                  </div>
-                </n-tab-pane>
-
-                <n-tab-pane name="elements" tab="章节元素" display-directive="if">
-                  <div class="elements-tab-wrap primary-tab-pane">
-                    <ChapterElementPanel
-                      :slug="slug"
-                      :current-chapter-number="currentChapter.number"
-                      :read-only="isAssistedReadOnly"
-                      :last-workflow-result="lastWorkflowResult"
-                      :qc-chapter-number="lastQcChapterNumber"
-                      :autopilot-chapter-review="autopilotChapterReview"
-                    />
-                  </div>
-                </n-tab-pane>
-              </n-tabs>
+              </div>
+              </template>
             </div>
           </template>
 
           <template #rail>
             <div class="rail-column">
             <div class="rail-head">
-              <n-text strong style="font-size: 13px">本章任务与状态</n-text>
+              <n-text strong style="font-size: 13px">{{ railTitle }}</n-text>
               <n-button v-if="!desk.stacked" quaternary circle size="small" @click="desk.toggleRail()" title="收起侧栏">
                 <template #icon>
                   <ChevronForwardOutline />
@@ -237,26 +143,37 @@
             </div>
             <n-scrollbar class="rail-scroll">
               <div class="rail-scroll-pad">
-                <ChapterContentPanel
+                <template v-if="auxPaneId === 'tasks-and-status'">
+                  <ChapterContentPanel
+                    :slug="slug"
+                    :current-chapter-number="currentChapter?.number ?? null"
+                    :read-only="isAssistedReadOnly"
+                    :autopilot-chapter-review="autopilotChapterReview"
+                    :assist-stream-beat-session="railAssistBeatSession"
+                    :assist-stream-failed-chapter="assistStreamFailedChapter"
+                    :assist-stream-plan-failed-chapter="assistStreamPlanFailedChapter"
+                    :autopilot-outline-plan-failed="autopilotOutlinePlanFailedForRail"
+                    :assist-stream-completed-chapter="lastQcChapterNumber"
+                  />
+                  <ChapterStatusPanel
+                    :slug="slug"
+                    :chapter="currentChapter"
+                    :read-only="isAssistedReadOnly"
+                    :last-workflow-result="lastWorkflowResult"
+                    :qc-chapter-number="lastQcChapterNumber"
+                    :autopilot-chapter-review="autopilotChapterReview"
+                    @clear-qc="clearWorkflowQc"
+                    @go-editor="focusManuscriptEditor"
+                  />
+                </template>
+                <ChapterElementPanel
+                  v-show="auxPaneId === 'elements'"
                   :slug="slug"
-                  :current-chapter-number="currentChapter?.number ?? null"
-                  :read-only="isAssistedReadOnly"
-                  :autopilot-chapter-review="autopilotChapterReview"
-                  :assist-stream-beat-session="railAssistBeatSession"
-                  :assist-stream-failed-chapter="assistStreamFailedChapter"
-                  :assist-stream-plan-failed-chapter="assistStreamPlanFailedChapter"
-                  :autopilot-outline-plan-failed="autopilotOutlinePlanFailedForRail"
-                  :assist-stream-completed-chapter="lastQcChapterNumber"
-                />
-                <ChapterStatusPanel
-                  :slug="slug"
-                  :chapter="currentChapter"
+                  :current-chapter-number="currentChapter?.number ?? 0"
                   :read-only="isAssistedReadOnly"
                   :last-workflow-result="lastWorkflowResult"
                   :qc-chapter-number="lastQcChapterNumber"
                   :autopilot-chapter-review="autopilotChapterReview"
-                  @clear-qc="clearWorkflowQc"
-                  @go-editor="focusManuscriptEditor"
                 />
               </div>
             </n-scrollbar>
@@ -266,7 +183,7 @@
           <template #rail-collapsed-actions>
             <n-tooltip v-for="id in CHAPTER_DESK_AUX_ORDER" :key="id" placement="left" trigger="hover">
               <template #trigger>
-                <n-button quaternary size="small" class="rail-icon-btn" @click="primaryDeskTab = id">
+                <n-button quaternary size="small" class="rail-icon-btn" :type="auxPaneId === id ? 'primary' : 'default'" @click="openAuxPane(id)">
                   <template #icon>
                     <component :is="auxPaneIcon(id)" />
                   </template>
@@ -713,15 +630,15 @@ import TraceRecordPanel from './TraceRecordPanel.vue'
 import AutopilotWorkspace from '../autopilot/AutopilotWorkspace.vue'
 import { useChapterDeskLayout } from '../../composables/useChapterDeskLayout'
 import { useWorkbenchRefreshStore } from '../../stores/workbenchRefreshStore'
+
+import { narrativeOrdinalLabel } from '@/utils/narrativeUnitLabel'
+import { loadAssistBeatSession, persistAssistBeatSession } from '@/utils/assistBeatSession'
 import {
   CHAPTER_DESK_AUX_ORDER,
   CHAPTER_DESK_AUX_SURFACES,
   type ChapterDeskAuxPaneId,
-  type PrimaryChapterDeskTab,
 } from '../../workbench/chapterDeskSurface'
-import { narrativeOrdinalLabel } from '@/utils/narrativeUnitLabel'
-import { loadAssistBeatSession, persistAssistBeatSession } from '@/utils/assistBeatSession'
-import { AppsOutline, ChevronForwardOutline } from '@vicons/ionicons5'
+import { AppsOutline, ListOutline, ChevronForwardOutline } from '@vicons/ionicons5'
 
 interface Chapter {
   id: number
@@ -768,6 +685,9 @@ const { deskTick } = storeToRefs(workbenchRefresh)
 const primaryDeskTab = ref<PrimaryChapterDeskTab>('manuscript')
 const showGuardrailModal = ref(false)
 const showTraceModal = ref(false)
+/** 右侧辅助面板 */
+const auxPaneId = ref<ChapterDeskAuxPaneId>('tasks-and-status')
+const railTitle = computed(() => CHAPTER_DESK_AUX_SURFACES[auxPaneId.value]?.label || '任务与状态')
 const guardrailSnapshot = ref<GuardrailCheckResponse | null>(null)
 
 function focusManuscriptEditor() {
@@ -784,9 +704,17 @@ watch(
 
 function auxPaneIcon(id: ChapterDeskAuxPaneId): Component {
   const map: Record<ChapterDeskAuxPaneId, Component> = {
+    'tasks-and-status': ListOutline,
     elements: AppsOutline,
   }
-  return map[id]
+  return map[id] ?? ListOutline
+}
+
+function openAuxPane(id: ChapterDeskAuxPaneId) {
+  auxPaneId.value = id
+  if (!desk.railExpanded.value) {
+    desk.toggleRail()
+  }
 }
 
 /** 辅助撰稿：编辑与章级工具；托管撰稿：驾驶舱 + 监控大盘 */
@@ -1312,6 +1240,7 @@ const tensionStuckReason = ref('')
 const tensionResult = ref<TensionDiagnosis | null>(null)
 
 const openTensionModal = () => {
+  if (!currentChapter.value) { message.warning('请先选择章节'); return }
   tensionResult.value = null
   tensionStuckReason.value = ''
   showTensionModal.value = true
@@ -1422,6 +1351,8 @@ const currentChapter = computed(() => {
   if (!props.currentChapterId) return null
   return props.chapters.find(ch => ch.id === props.currentChapterId) || null
 })
+
+const currentTitle = computed(() => currentChapter.value?.title || '')
 
 const deskChapterTitle = computed(() => {
   const ch = currentChapter.value
@@ -1596,7 +1527,7 @@ const handleReload = async () => {
 }
 
 const handleGenerateChapter = async () => {
-  if (!currentChapter.value) return
+  if (!currentChapter.value) { message.warning('请先选择章节'); return }
   if (isAssistedReadOnly.value) {
     message.warning('托管运行中不可使用快速生成')
     return
@@ -1615,7 +1546,7 @@ const handleGenerateChapter = async () => {
 }
 
 const handleRegenerateChapter = async () => {
-  if (!currentChapter.value) return
+  if (!currentChapter.value) { message.warning('请先选择章节'); return }
   if (isAssistedReadOnly.value) {
     message.warning('托管运行中不可使用重新生成')
     return
@@ -1945,7 +1876,12 @@ function ensureAssistedMode() {
   workMode.value = 'assisted'
 }
 
-defineExpose({ ensureAssistedMode })
+defineExpose({
+  ensureAssistedMode,
+  triggerQuickGenerate: handleGenerateChapter,
+  triggerRegenerate: handleRegenerateChapter,
+  triggerTensionDiagnosis: openTensionModal,
+})
 </script>
 
 <style scoped>
@@ -2254,11 +2190,6 @@ defineExpose({ ensureAssistedMode })
   resize: none;
 }
 
-.editor-footer {
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
 /* 🔥 流式编辑框：编辑框本身就是流式显示 */
 .editor-input-wrapper {
   position: relative;
@@ -2266,6 +2197,19 @@ defineExpose({ ensureAssistedMode })
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.editor-wordcount-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  font-size: 11px;
+  color: var(--app-text-muted);
+  background: var(--app-surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  opacity: .75;
 }
 
 .editor-input-wrapper.is-streaming :deep(.n-input) {

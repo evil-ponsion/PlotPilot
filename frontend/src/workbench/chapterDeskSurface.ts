@@ -8,8 +8,8 @@ export const CHAPTER_DESK_PRIMARY_ID = 'manuscript' as const
 /** 常驻侧栏（任务单 + 状态）：与正文同屏，宽屏为 aside，窄屏为抽屉 */
 export const CHAPTER_DESK_RAIL_ZONE = 'rail_context' as const
 
-/** 主栏可选工具页（仅保留需手点编辑的「章节元素」） */
-export type ChapterDeskAuxPaneId = 'elements'
+/** 右侧辅助面板 */
+export type ChapterDeskAuxPaneId = 'tasks-and-status' | 'elements'
 
 /** 主工作区当前 Tab */
 export type PrimaryChapterDeskTab = 'manuscript' | ChapterDeskAuxPaneId
@@ -21,10 +21,11 @@ export interface ChapterDeskSurfaceMeta {
 }
 
 export const CHAPTER_DESK_AUX_SURFACES: Record<ChapterDeskAuxPaneId, ChapterDeskSurfaceMeta> = {
+  'tasks-and-status': { id: 'tasks-and-status', label: '本章任务与状态', shortLabel: '状态' },
   elements: { id: 'elements', label: '章节元素', shortLabel: '元素' },
 }
 
-export const CHAPTER_DESK_AUX_ORDER: ChapterDeskAuxPaneId[] = ['elements']
+export const CHAPTER_DESK_AUX_ORDER: ChapterDeskAuxPaneId[] = ['tasks-and-status', 'elements']
 
 export function chapterDeskAuxLabel(id: ChapterDeskAuxPaneId): string {
   return CHAPTER_DESK_AUX_SURFACES[id].label

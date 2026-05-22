@@ -374,16 +374,8 @@ class ContextAssemblerNode(BaseNode):
         cpms_node_key="",
         description="将所有上下文拼装为 {{context}} 字符串，按 T0>T1>T2 优先级 + Token 预算裁剪",
         default_edges=["exec_writer"],
-        default_dag_slot=DefaultDagSlot(
-            instance_id="ctx_assembler",
-            position={"x": 350, "y": 500},
-            incoming_from=[
-                "ctx_blueprint", "ctx_memory", "ctx_foreshadow", "ctx_voice",
-                "ctx_debt", "ctx_characters", "ctx_recent", "ctx_storyline",
-                "exec_beat",
-            ],
-            outgoing_to=["exec_writer"],
-        ),
+        # ctx_assembler 已在默认 DAG 中
+        default_dag_slot=None,
     )
 
     async def execute(self, inputs: Dict[str, Any], context: Dict[str, Any]) -> NodeResult:
@@ -674,11 +666,8 @@ class RecentChaptersNode(BaseNode):
         cpms_node_key="context-recent",
         description="从最近章节摘要组装前情提要",
         default_edges=["exec_writer"],
-        default_dag_slot=DefaultDagSlot(
-            instance_id="ctx_recent",
-            position={"x": 100, "y": 1000},
-            outgoing_to=["exec_writer"],
-        ),
+        # ctx_recent 已在默认 DAG 中
+        default_dag_slot=None,
     )
 
     async def execute(self, inputs: Dict[str, Any], context: Dict[str, Any]) -> NodeResult:
@@ -789,11 +778,8 @@ class CharactersNode(BaseNode):
         cpms_node_key="context-characters",
         description="从 Bible + CharacterState 组装角色档案上下文",
         default_edges=["exec_writer"],
-        default_dag_slot=DefaultDagSlot(
-            instance_id="ctx_characters",
-            position={"x": 100, "y": 850},
-            outgoing_to=["exec_writer"],
-        ),
+        # ctx_characters 已在默认 DAG 中
+        default_dag_slot=None,
     )
 
     async def execute(self, inputs: Dict[str, Any], context: Dict[str, Any]) -> NodeResult:

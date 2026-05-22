@@ -1,17 +1,20 @@
 <template>
   <div class="wb-toolbar">
     <div class="toolbar-group">
-      <n-button size="tiny" :type="isRunning ? 'warning' : 'primary'" @click="$emit('run')">
-        {{ isRunning ? '⏸️ 暂停' : '▶️ 运行' }}
+      <n-button size="tiny" :type="autopilotRunning ? 'warning' : 'primary'" @click="$emit('autopilot')">
+        {{ autopilotRunning ? '⏸️ 托管中' : '🚀 启动全托管' }}
       </n-button>
     </div>
 
     <div class="toolbar-group">
-      <n-button size="tiny" quaternary @click="$emit('search')">
-        🔍
+      <n-button size="tiny" secondary @click="$emit('quickGenerate')">
+        ⚡ 快速生成
       </n-button>
-      <n-button size="tiny" quaternary @click="$emit('replace')">
-        🔄
+      <n-button size="tiny" secondary @click="$emit('regenerate')">
+        🔄 重新生成
+      </n-button>
+      <n-button size="tiny" secondary @click="$emit('tensionDiagnosis')">
+        🔍 张力诊断
       </n-button>
     </div>
 
@@ -26,11 +29,12 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{ isRunning?: boolean }>()
+defineProps<{ autopilotRunning?: boolean }>()
 defineEmits<{
-  run: []
-  search: []
-  replace: []
+  autopilot: []
+  quickGenerate: []
+  regenerate: []
+  tensionDiagnosis: []
   save: []
 }>()
 </script>
