@@ -74,6 +74,8 @@ import { useMessage } from 'naive-ui'
 import { useDAGStore } from '@/stores/dagStore'
 import { useDAGRunStore } from '@/stores/dagRunStore'
 import { useAutopilotWorkspaceStore } from '@/stores/autopilotWorkspaceStore'
+import { autopilotApi } from '@/api/autopilot'
+import { toAutopilotDAGDisplayStatus, type AutopilotDisplayStatus } from '@/workbench/autopilotStatus'
 import DAGToolbar from './DAGToolbar.vue'
 import DAGCanvas from './DAGCanvas.vue'
 import NodeContextMenu from './NodeContextMenu.vue'
@@ -88,7 +90,7 @@ const runStore = useDAGRunStore()
 const message = useMessage()
 
 // ★ 托管模式状态（从后端获取，DAG只是展示层）
-const autopilotStatus = ref<'idle' | 'running' | 'paused' | 'completed' | 'error'>('idle')
+const autopilotStatus = ref<AutopilotDisplayStatus>('idle')
 
 // 右键菜单状态
 const contextMenu = reactive({
@@ -251,15 +253,21 @@ async function fetchAutopilotStatus() {
 
     if (ap === 'completed') {
       autopilotStatus.value = 'completed'
-    } else if (ap === 'error') {
-      autopilotStatus.value = 'error'
-    } else if (ap === 'running' && humanGate) {
-      autopilotStatus.value = 'paused'
-    } else if (ap === 'running') {
-      autopilotStatus.value = 'running'
-    } else {
-      autopilotStatus.value = 'idle'
+      return
     }
+    if (ap === 'error') {
+      autopilotStatus.value = 'error'
+      return
+    }
+    if (ap === 'running' && humanGate) {
+      autopilotStatus.value = 'paused'
+      return
+    }
+    if (ap === 'running') {
+      autopilotStatus.value = 'running'
+      return
+    }
+    autopilotStatus.value = 'idle'
   } catch {
     autopilotStatus.value = 'idle'
   } finally {

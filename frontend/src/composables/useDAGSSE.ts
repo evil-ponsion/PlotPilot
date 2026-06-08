@@ -7,7 +7,7 @@
  * 3. 智能重连：指数退避，避免连接风暴
  * 4. 性能监控：记录指标，自动告警
  */
-import { onMounted, onUnmounted, watch, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, watch, type Ref } from 'vue'
 import { useDAGStore } from '@/stores/dagStore'
 import { useDAGRunStore } from '@/stores/dagRunStore'
 import type { NodeEvent, NodeStatus } from '@/types/dag'
@@ -34,10 +34,11 @@ const PERF_THRESHOLDS = {
   renderTime: 100,
 }
 
-export function useDAGSSE(novelId: Ref<string>) {
+export function useDAGSSE(novelId: Ref<string>, enabled?: Ref<boolean>) {
   const dagStore = useDAGStore()
   const runStore = useDAGRunStore()
   const isDev = import.meta.env.DEV
+  const shouldConnect = computed(() => enabled?.value ?? true)
 
   let isMounted = false
 
@@ -204,13 +205,25 @@ export function useDAGSSE(novelId: Ref<string>) {
       if (isDev) {
         console.warn('[SSE] 连接断开')
       }
-      if (runStore.runStatus === 'running') {
+      if (shouldConnect.value && runStore.runStatus === 'running') {
         smartReconnect()
       }
     }
   })
 
   // ─── 生命周期 ───
+
+  function connectCurrentNovel() {
+    if (!shouldConnect.value || !novelId.value) return
+    runStore.connectSSE(novelId.value)
+    runStore.connectAutopilotLog(novelId.value, handleAutopilotLogEvent)
+    syncFromAutopilotStatus(novelId.value)
+  }
+
+  function disconnectCurrentNovel() {
+    runStore.disconnectSSE()
+    runStore.disconnectAutopilotLog()
+  }
 
   onMounted(() => {
     isMounted = true
@@ -255,15 +268,24 @@ export function useDAGSSE(novelId: Ref<string>) {
       // 刷新队列
       flushQueue()
 
-      runStore.disconnectSSE()
-      runStore.disconnectAutopilotLog()
+      disconnectCurrentNovel()
 
-      if (newId) {
+      if (newId && shouldConnect.value) {
         reconnectAttempts = 0
         runStore.connectSSE(newId)
         runStore.connectAutopilotLog(newId, handleAutopilotLogEvent)
         syncFromAutopilotStatus(newId)
       }
+    }
+  })
+
+  watch(shouldConnect, (active) => {
+    flushQueue()
+    if (active) {
+      reconnectAttempts = 0
+      connectCurrentNovel()
+    } else {
+      disconnectCurrentNovel()
     }
   })
 
